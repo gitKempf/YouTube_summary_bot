@@ -1,0 +1,15 @@
+.env
+cred.md
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.mp3
+*.ogg
+*.wav
+*.opus
+.venv/
+venv/
+dist/
+*.egg-info/
+/tmp/

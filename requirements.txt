@@ -1,0 +1,9 @@
+python-telegram-bot>=22.0
+yt-dlp
+elevenlabs
+anthropic
+edge-tts
+python-dotenv
+pytest
+pytest-mock
+pytest-asyncio
