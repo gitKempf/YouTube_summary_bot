@@ -1,3 +1,5 @@
+import asyncio
+import re
 import subprocess
 from pathlib import Path
 
@@ -10,25 +12,59 @@ class TTSError(Exception):
 
 VOICE_MAP = {
     "en": "en-US-GuyNeural",
+    "eng": "en-US-GuyNeural",
     "ru": "ru-RU-DmitryNeural",
+    "rus": "ru-RU-DmitryNeural",
     "es": "es-ES-AlvaroNeural",
+    "spa": "es-ES-AlvaroNeural",
     "fr": "fr-FR-HenriNeural",
+    "fra": "fr-FR-HenriNeural",
     "de": "de-DE-ConradNeural",
+    "deu": "de-DE-ConradNeural",
     "it": "it-IT-DiegoNeural",
+    "ita": "it-IT-DiegoNeural",
     "pt": "pt-BR-AntonioNeural",
+    "por": "pt-BR-AntonioNeural",
     "ja": "ja-JP-KeitaNeural",
+    "jpn": "ja-JP-KeitaNeural",
     "ko": "ko-KR-InJoonNeural",
+    "kor": "ko-KR-InJoonNeural",
     "zh": "zh-CN-YunxiNeural",
+    "zho": "zh-CN-YunxiNeural",
     "ar": "ar-SA-HamedNeural",
+    "ara": "ar-SA-HamedNeural",
     "hi": "hi-IN-MadhurNeural",
+    "hin": "hi-IN-MadhurNeural",
     "uk": "uk-UA-OstapNeural",
+    "ukr": "uk-UA-OstapNeural",
     "pl": "pl-PL-MarekNeural",
+    "pol": "pl-PL-MarekNeural",
     "tr": "tr-TR-AhmetNeural",
+    "tur": "tr-TR-AhmetNeural",
 }
+
+TTS_TIMEOUT_SECONDS = 120
 
 
 def get_voice_for_language(language_code: str) -> str:
     return VOICE_MAP.get(language_code, "en-US-GuyNeural")
+
+
+def strip_markdown(text: str) -> str:
+    """Remove markdown formatting that causes edge-tts to hang or sound wrong."""
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"\*(.+?)\*", r"\1", text)
+    text = re.sub(r"__(.+?)__", r"\1", text)
+    text = re.sub(r"_(.+?)_", r"\1", text)
+    text = re.sub(r"`(.+?)`", r"\1", text)
+    text = re.sub(r"^\s*[-*]\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", text)
+    text = re.sub(r"---+", "", text)
+    # Collapse multiple newlines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 async def generate_voice(
@@ -39,9 +75,16 @@ async def generate_voice(
     if not text or not text.strip():
         raise ValueError("Cannot generate voice from empty text")
 
+    clean_text = strip_markdown(text)
+
     try:
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(str(output_path))
+        communicate = edge_tts.Communicate(clean_text, voice)
+        await asyncio.wait_for(
+            communicate.save(str(output_path)),
+            timeout=TTS_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        raise TTSError(f"TTS timed out after {TTS_TIMEOUT_SECONDS}s")
     except Exception as e:
         raise TTSError(f"Edge-TTS error: {e}") from e
 

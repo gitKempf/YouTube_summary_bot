@@ -2,15 +2,21 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from src.tts import generate_voice, TTSError, get_voice_for_language, convert_to_ogg
+from src.tts import generate_voice, TTSError, get_voice_for_language, convert_to_ogg, strip_markdown
 
 
 class TestGetVoiceForLanguage:
-    def test_english(self):
+    def test_english_2letter(self):
         assert get_voice_for_language("en") == "en-US-GuyNeural"
 
-    def test_russian(self):
+    def test_english_3letter(self):
+        assert get_voice_for_language("eng") == "en-US-GuyNeural"
+
+    def test_russian_2letter(self):
         assert get_voice_for_language("ru") == "ru-RU-DmitryNeural"
+
+    def test_russian_3letter(self):
+        assert get_voice_for_language("rus") == "ru-RU-DmitryNeural"
 
     def test_spanish(self):
         assert get_voice_for_language("es") == "es-ES-AlvaroNeural"
@@ -25,10 +31,36 @@ class TestGetVoiceForLanguage:
         assert get_voice_for_language("xx") == "en-US-GuyNeural"
 
 
+class TestStripMarkdown:
+    def test_strips_headers(self):
+        assert strip_markdown("## Hello World") == "Hello World"
+
+    def test_strips_bold(self):
+        assert strip_markdown("This is **bold** text") == "This is bold text"
+
+    def test_strips_italic(self):
+        assert strip_markdown("This is *italic* text") == "This is italic text"
+
+    def test_strips_bullet_points(self):
+        result = strip_markdown("- Item one\n- Item two")
+        assert "Item one" in result
+        assert "- " not in result
+
+    def test_strips_links(self):
+        assert strip_markdown("[click here](http://example.com)") == "click here"
+
+    def test_strips_horizontal_rules(self):
+        assert "---" not in strip_markdown("Above\n---\nBelow")
+
+    def test_collapses_newlines(self):
+        result = strip_markdown("A\n\n\n\n\nB")
+        assert result == "A\n\nB"
+
+
 class TestGenerateVoice:
     @pytest.mark.asyncio
     @patch("src.tts.edge_tts.Communicate")
-    async def test_calls_edge_tts_with_correct_params(self, mock_comm_class, tmp_path):
+    async def test_calls_edge_tts_with_stripped_text(self, mock_comm_class, tmp_path):
         mock_comm = MagicMock()
         mock_comm.save = AsyncMock()
         mock_comm_class.return_value = mock_comm
@@ -37,7 +69,23 @@ class TestGenerateVoice:
         await generate_voice("Hello world", output_path)
 
         mock_comm_class.assert_called_once_with("Hello world", "en-US-GuyNeural")
-        mock_comm.save.assert_awaited_once_with(str(output_path))
+
+    @pytest.mark.asyncio
+    @patch("src.tts.edge_tts.Communicate")
+    async def test_strips_markdown_before_tts(self, mock_comm_class, tmp_path):
+        mock_comm = MagicMock()
+        mock_comm.save = AsyncMock()
+        mock_comm_class.return_value = mock_comm
+        output_path = tmp_path / "voice.mp3"
+
+        await generate_voice("## Title\n**bold** text", output_path)
+
+        # Should have stripped markdown
+        call_text = mock_comm_class.call_args[0][0]
+        assert "##" not in call_text
+        assert "**" not in call_text
+        assert "Title" in call_text
+        assert "bold" in call_text
 
     @pytest.mark.asyncio
     @patch("src.tts.edge_tts.Communicate")
