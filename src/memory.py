@@ -88,11 +88,12 @@ class MemoryManager:
             logger.warning(f"Memory search failed: {e}")
             return []
 
-    async def add(self, text: str, user_id: str) -> None:
+    async def add(self, text: str, user_id: str, metadata: dict = None) -> None:
         try:
-            await asyncio.to_thread(
-                self._memory.add, text, user_id=user_id, infer=False
-            )
+            kwargs = {"user_id": user_id, "infer": False}
+            if metadata:
+                kwargs["metadata"] = metadata
+            await asyncio.to_thread(self._memory.add, text, **kwargs)
         except Exception as e:
             logger.warning(f"Memory add failed: {e}")
 

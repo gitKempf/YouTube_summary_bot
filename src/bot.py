@@ -256,14 +256,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if config.memory_enabled and fact_check_result and memory_mgr:
             try:
                 await progress.update(96, "Saving to memory...")
-                new_facts = "\n".join(
-                    c.claim.text for c in fact_check_result.new_claims
-                )
-                if new_facts:
-                    await memory_mgr.add(new_facts, user_id=user_mem_id)
-                    logger.info(f"[MEMORY] Stored {len(fact_check_result.new_claims)} new facts for {user_mem_id}")
-                else:
-                    logger.info("[MEMORY] No new facts to store")
+                stored = 0
+                for cc in fact_check_result.new_claims:
+                    claim = cc.claim
+                    # Store each claim as a separate entry with metadata
+                    meta = {
+                        "entity": claim.entity,
+                        "relation": claim.relation,
+                        "value": claim.value,
+                        "video_id": video_id,
+                    }
+                    await memory_mgr.add(
+                        claim.text, user_id=user_mem_id, metadata=meta
+                    )
+                    stored += 1
+                logger.info(f"[MEMORY] Stored {stored} individual claims for {user_mem_id}")
             except Exception as e:
                 logger.warning(f"Failed to store memories: {e}", exc_info=True)
 

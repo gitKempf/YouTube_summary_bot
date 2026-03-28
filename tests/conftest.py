@@ -31,4 +31,5 @@ def mock_context():
     context.bot.send_voice = AsyncMock()
     context.bot.send_message = AsyncMock()
     context.bot.send_chat_action = AsyncMock()
+    context.bot_data = {}
     return context
