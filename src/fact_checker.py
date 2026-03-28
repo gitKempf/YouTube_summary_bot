@@ -1,6 +1,7 @@
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
 
@@ -23,6 +24,9 @@ class Claim:
     entity: str
     relation: str
     value: str
+    confidence: float = 0.8
+    video_id: str = ""
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
 @dataclass
@@ -47,7 +51,9 @@ EXTRACTION_PROMPT = (
     '- "text": the full claim as a natural sentence\n'
     '- "entity": the main subject/entity\n'
     '- "relation": the relationship or action\n'
-    '- "value": the object or value\n\n'
+    '- "value": the object or value\n'
+    '- "confidence": float 0.0-1.0 (how confident is this claim based on the transcript, '
+    "1.0 = explicitly stated, 0.5 = implied/inferred)\n\n"
     "Extract only concrete, factual claims — not opinions or filler.\n"
     "Return ONLY valid JSON, no markdown or explanation."
 )
@@ -67,12 +73,16 @@ CLASSIFICATION_PROMPT = (
 
 
 async def extract_claims(
-    transcript: str, api_key: str, model: str = "claude-sonnet-4-6"
+    transcript: str,
+    api_key: str,
+    model: str = "claude-sonnet-4-6",
+    video_id: str = "",
 ) -> List[Claim]:
     if not transcript or not transcript.strip():
         return []
 
     client = AsyncAnthropic(api_key=api_key)
+    now = datetime.now(timezone.utc).isoformat()
 
     try:
         response = await client.messages.create(
@@ -82,7 +92,6 @@ async def extract_claims(
             messages=[{"role": "user", "content": transcript[:8000]}],
         )
         raw = response.content[0].text
-        # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0]
         claims_data = json.loads(raw)
@@ -92,6 +101,9 @@ async def extract_claims(
                 entity=c.get("entity", ""),
                 relation=c.get("relation", ""),
                 value=c.get("value", ""),
+                confidence=float(c.get("confidence", 0.8)),
+                video_id=video_id,
+                timestamp=now,
             )
             for c in claims_data
             if c.get("text")
@@ -113,7 +125,6 @@ async def classify_claims(
     if not claims:
         return FactCheckResult([], [], [], "")
 
-    # If no memories, everything is new — skip LLM call
     if not memories:
         new = [ClassifiedClaim(claim=c, status=ClaimStatus.NEW) for c in claims]
         return FactCheckResult(new_claims=new, supported_claims=[], contradicted_claims=[], context_summary="")
@@ -144,11 +155,9 @@ async def classify_claims(
         classifications = json.loads(raw)
     except Exception as e:
         logger.warning(f"Claim classification failed: {e}")
-        # Fallback: treat all as new
         new = [ClassifiedClaim(claim=c, status=ClaimStatus.NEW) for c in claims]
         return FactCheckResult(new_claims=new, supported_claims=[], contradicted_claims=[], context_summary="")
 
-    # Map claim texts back to Claim objects
     claim_map = {c.text: c for c in claims}
     new_claims = []
     supported_claims = []
@@ -160,9 +169,8 @@ async def classify_claims(
         matching = item.get("matching_memory")
 
         claim = claim_map.get(claim_text)
-        if not claim:
-            # Try fuzzy match — find closest claim
-            claim = claims[min(range(len(claims)), key=lambda i: abs(len(claims[i].text) - len(claim_text)))] if claims else None
+        if not claim and claims:
+            claim = min(claims, key=lambda c: abs(len(c.text) - len(claim_text)))
         if not claim:
             continue
 

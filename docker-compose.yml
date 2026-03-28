@@ -1,19 +1,27 @@
 services:
-  postgres:
-    image: pgvector/pgvector:pg16
+  bot:
+    build: .
+    env_file: .env
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: mem0
+      - MEM0_QDRANT_HOST=qdrant
+      - MEM0_QDRANT_PORT=6333
+      - MEM0_NEO4J_URL=bolt://neo4j:7687
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
     ports:
-      - "5433:5432"
+      - "6333:6333"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   neo4j:
     image: neo4j:5
@@ -29,22 +37,8 @@ services:
       test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "neo4jpassword", "RETURN 1"]
       interval: 10s
       timeout: 5s
-      retries: 5
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      retries: 10
 
 volumes:
-  postgres_data:
-  neo4j_data:
   qdrant_data:
+  neo4j_data:

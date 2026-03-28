@@ -15,14 +15,13 @@ class Config:
     tts_voice: str = "en-US-RogerNeural"
     claude_model: str = "claude-sonnet-4-6"
     max_tokens: int = 4096
-    # Memory system (opt-in via MEM0_ENABLED=true)
+    # Memory system
     memory_enabled: bool = False
-    pg_host: str = "localhost"
-    pg_port: int = 5432
-    pg_dbname: str = "mem0"
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
     neo4j_url: str = "bolt://localhost:7687"
     neo4j_username: str = "neo4j"
-    neo4j_password: str = "password"
+    neo4j_password: str = "neo4jpassword"
 
     def is_user_allowed(self, user_id: int) -> bool:
         if not self.allowed_user_ids:
@@ -51,8 +50,6 @@ def get_config() -> Config:
         int(uid.strip()) for uid in raw_ids.split(",") if uid.strip()
     )
 
-    required_channel = os.getenv("REQUIRED_CHANNEL", "")
-
     mem0_enabled = os.getenv("MEM0_ENABLED", "").lower() in ("true", "1", "yes")
 
     return Config(
@@ -60,12 +57,11 @@ def get_config() -> Config:
         elevenlabs_api_key=el_key,
         anthropic_api_key=ant_key,
         allowed_user_ids=allowed,
-        required_channel=required_channel,
+        required_channel=os.getenv("REQUIRED_CHANNEL", ""),
         memory_enabled=mem0_enabled,
-        pg_host=os.getenv("MEM0_PG_HOST", "localhost"),
-        pg_port=int(os.getenv("MEM0_PG_PORT", "5432")),
-        pg_dbname=os.getenv("MEM0_PG_DBNAME", "mem0"),
+        qdrant_host=os.getenv("MEM0_QDRANT_HOST", "localhost"),
+        qdrant_port=int(os.getenv("MEM0_QDRANT_PORT", "6333")),
         neo4j_url=os.getenv("MEM0_NEO4J_URL", "bolt://localhost:7687"),
         neo4j_username=os.getenv("MEM0_NEO4J_USER", "neo4j"),
-        neo4j_password=os.getenv("MEM0_NEO4J_PASSWORD", "password"),
+        neo4j_password=os.getenv("MEM0_NEO4J_PASSWORD", "neo4jpassword"),
     )

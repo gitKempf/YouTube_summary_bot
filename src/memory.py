@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from mem0 import Memory
 
@@ -19,6 +19,7 @@ class MemoryEntry:
     id: str
     text: str
     score: float = 0.0
+    metadata: Optional[dict] = None
 
 
 class MemoryManager:
@@ -40,32 +41,38 @@ class MemoryManager:
                     "embedding_dims": 384,
                 },
             },
+            "vector_store": {
+                "provider": "qdrant",
+                "config": {
+                    "collection_name": "youtube_bot_memories",
+                    "embedding_model_dims": 384,
+                    "host": config.qdrant_host,
+                    "port": config.qdrant_port,
+                },
+            },
             "version": "v1.1",
         }
 
-        # Qdrant: use server mode if available, otherwise local disk
-        qdrant_config = {
-            "collection_name": "youtube_bot_memories",
-            "embedding_model_dims": 384,
-        }
+        # Connect Neo4j graph store if reachable
         try:
             import socket
             s = socket.socket()
             s.settimeout(2)
-            s.connect(("localhost", 6333))
+            host = config.neo4j_url.split("://")[1].split(":")[0]
+            port = int(config.neo4j_url.split(":")[-1])
+            s.connect((host, port))
             s.close()
-            qdrant_config["host"] = "localhost"
-            qdrant_config["port"] = 6333
-            logger.info("Using Qdrant server mode (concurrent-safe)")
+            mem0_config["graph_store"] = {
+                "provider": "neo4j",
+                "config": {
+                    "url": config.neo4j_url,
+                    "username": config.neo4j_username,
+                    "password": config.neo4j_password,
+                },
+            }
+            logger.info("Neo4j graph store connected")
         except Exception:
-            qdrant_config["on_disk"] = True
-            qdrant_config["path"] = "/tmp/mem0_qdrant"
-            logger.info("Using Qdrant local mode (singleton required)")
-
-        mem0_config["vector_store"] = {
-            "provider": "qdrant",
-            "config": qdrant_config,
-        }
+            logger.info("Neo4j not available, using vector-only memory")
 
         self._memory = Memory.from_config(config_dict=mem0_config)
 
@@ -81,6 +88,7 @@ class MemoryManager:
                     id=r.get("id", ""),
                     text=r.get("memory", ""),
                     score=r.get("score", 0.0),
+                    metadata=r.get("metadata"),
                 )
                 for r in result.get("results", [])
             ]
@@ -90,7 +98,7 @@ class MemoryManager:
 
     async def add(self, text: str, user_id: str, metadata: dict = None) -> None:
         try:
-            kwargs = {"user_id": user_id, "infer": False}
+            kwargs = {"user_id": user_id, "infer": True}
             if metadata:
                 kwargs["metadata"] = metadata
             await asyncio.to_thread(self._memory.add, text, **kwargs)
@@ -104,6 +112,7 @@ class MemoryManager:
                 MemoryEntry(
                     id=r.get("id", ""),
                     text=r.get("memory", ""),
+                    metadata=r.get("metadata"),
                 )
                 for r in result.get("results", [])
             ]

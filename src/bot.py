@@ -191,7 +191,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await progress.update(12, "Analyzing topics...")
                 logger.info(f"[MEMORY] Extracting claims for user {user_mem_id}")
                 claims = await extract_claims(
-                    transcript_text, config.anthropic_api_key, config.claude_model
+                    transcript_text, config.anthropic_api_key, config.claude_model,
+                    video_id=video_id,
                 )
                 logger.info(f"[MEMORY] Extracted {len(claims)} claims")
                 for c in claims[:5]:
@@ -259,12 +260,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 stored = 0
                 for cc in fact_check_result.new_claims:
                     claim = cc.claim
-                    # Store each claim as a separate entry with metadata
                     meta = {
                         "entity": claim.entity,
                         "relation": claim.relation,
                         "value": claim.value,
-                        "video_id": video_id,
+                        "confidence": claim.confidence,
+                        "video_id": claim.video_id,
+                        "timestamp": claim.timestamp,
                     }
                     await memory_mgr.add(
                         claim.text, user_id=user_mem_id, metadata=meta

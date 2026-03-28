@@ -99,9 +99,9 @@ def test_config_memory_enabled_when_configured(monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "e")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
     monkeypatch.setenv("MEM0_ENABLED", "true")
-    monkeypatch.setenv("MEM0_PG_HOST", "db.example.com")
+    monkeypatch.setenv("MEM0_QDRANT_HOST", "qdrant.example.com")
     monkeypatch.setenv("MEM0_NEO4J_URL", "bolt://graph:7687")
     config = get_config()
     assert config.memory_enabled is True
-    assert config.pg_host == "db.example.com"
+    assert config.qdrant_host == "qdrant.example.com"
     assert config.neo4j_url == "bolt://graph:7687"

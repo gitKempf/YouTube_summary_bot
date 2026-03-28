@@ -10,10 +10,8 @@ def mem_config():
     config.memory_enabled = True
     config.anthropic_api_key = "fake-ant-key"
     config.claude_model = "claude-sonnet-4-6"
-    config.memory_enabled = True
-    config.pg_host = "localhost"
-    config.pg_port = 5432
-    config.pg_dbname = "mem0"
+    config.qdrant_host = "localhost"
+    config.qdrant_port = 6333
     config.neo4j_url = "bolt://localhost:7687"
     config.neo4j_username = "neo4j"
     config.neo4j_password = "password"
