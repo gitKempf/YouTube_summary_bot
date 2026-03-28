@@ -158,7 +158,7 @@ class MemoryManager:
             for mem in existing:
                 if mem.score >= threshold:
                     # Reinforce existing claim
-                    old_conf = (mem.metadata or {}).get("confidence", 0.8)
+                    old_conf = (mem.metadata or {}).get("confidence", 0.4)
                     old_occ = (mem.metadata or {}).get("occurrences", 1)
                     new_conf = reinforce_confidence(old_conf)
                     new_occ = old_occ + 1

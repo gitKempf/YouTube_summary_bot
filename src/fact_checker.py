@@ -24,7 +24,7 @@ class Claim:
     entity: str
     relation: str
     value: str
-    confidence: float = 0.8
+    confidence: float = 0.4
     video_id: str = ""
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -52,8 +52,9 @@ EXTRACTION_PROMPT = (
     '- "entity": the main subject/entity\n'
     '- "relation": the relationship or action\n'
     '- "value": the object or value\n'
-    '- "confidence": float 0.0-1.0 (how confident is this claim based on the transcript, '
-    "1.0 = explicitly stated, 0.5 = implied/inferred)\n\n"
+    '- "confidence": float 0.0-1.0 (how strongly the transcript supports this claim: '
+    "0.3 = vaguely implied, 0.5 = mentioned but unclear, 0.7 = clearly stated, "
+    "0.9 = explicitly stated with evidence. Default to 0.4 for new unverified claims)\n\n"
     "Extract only concrete, factual claims — not opinions or filler.\n"
     "Return ONLY valid JSON, no markdown or explanation."
 )
@@ -101,7 +102,7 @@ async def extract_claims(
                 entity=c.get("entity", ""),
                 relation=c.get("relation", ""),
                 value=c.get("value", ""),
-                confidence=float(c.get("confidence", 0.8)),
+                confidence=float(c.get("confidence", 0.4)),
                 video_id=video_id,
                 timestamp=now,
             )
