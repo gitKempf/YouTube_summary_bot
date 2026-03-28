@@ -48,7 +48,8 @@ class TestSummarizeText:
 
         call_kwargs = mock_client.messages.create.call_args[1]
         assert call_kwargs["system"] == SYSTEM_PROMPT
-        assert "fresh ideas" in SYSTEM_PROMPT.lower() or "new ideas" in SYSTEM_PROMPT.lower()
+        assert "voiceover" in SYSTEM_PROMPT.lower() or "narrator" in SYSTEM_PROMPT.lower()
+        assert "no bullet" in SYSTEM_PROMPT.lower() or "no markdown" in SYSTEM_PROMPT.lower()
 
     @pytest.mark.asyncio
     async def test_raises_on_empty_input(self):
