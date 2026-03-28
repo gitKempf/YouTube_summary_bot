@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import List
 
-from telegram import Update
+from telegram import Update, Message
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -21,14 +21,14 @@ from src.tts import generate_voice_chunked, get_voice_for_language, TTSError
 logger = logging.getLogger(__name__)
 
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+PROGRESS_BAR_WIDTH = 15
 
 
-def _progress_bar(step: int, total: int, label: str) -> str:
-    filled = step
-    empty = total - step
+def _progress_bar(percent: float, label: str) -> str:
+    filled = round(PROGRESS_BAR_WIDTH * percent / 100)
+    empty = PROGRESS_BAR_WIDTH - filled
     bar = "\u2593" * filled + "\u2591" * empty
-    percent = int(step / total * 100)
-    return f"{bar} {percent}%\n{label}"
+    return f"{bar} {int(percent)}%\n{label}"
 
 
 def split_message(text: str, max_length: int = TELEGRAM_MAX_MESSAGE_LENGTH) -> List[str]:
@@ -47,7 +47,6 @@ def split_message(text: str, max_length: int = TELEGRAM_MAX_MESSAGE_LENGTH) -> L
             if current:
                 chunks.append(current)
             if len(para) > max_length:
-                # Hard split on sentence boundaries
                 while len(para) > max_length:
                     cut = para[:max_length].rfind(". ")
                     if cut == -1:
@@ -69,6 +68,31 @@ def split_message(text: str, max_length: int = TELEGRAM_MAX_MESSAGE_LENGTH) -> L
     return chunks
 
 
+class ProgressTracker:
+    """Edits a single Telegram message to show a detailed progress bar."""
+
+    # Pipeline weight allocation (must sum to 100):
+    #   Transcript:  10%
+    #   Download:    15%  (only if fallback)
+    #   Transcribe:  15%  (only if fallback)
+    #   Summarize:   25%
+    #   Voice:       45%
+    #   Done:       100%
+
+    def __init__(self, status_msg: Message):
+        self._msg = status_msg
+        self._last_text = ""
+
+    async def update(self, percent: float, label: str):
+        text = _progress_bar(min(percent, 100), label)
+        if text != self._last_text:
+            self._last_text = text
+            try:
+                await self._msg.edit_text(text)
+            except Exception:
+                pass  # Telegram rate limit or message unchanged
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Welcome! Send me a YouTube video link and I'll create a summary for you.\n"
@@ -86,57 +110,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         video_id = extract_video_id(url)
 
         status_msg = await update.message.reply_text(
-            _progress_bar(0, 5, "Starting...")
+            _progress_bar(0, "Starting...")
         )
+        progress = ProgressTracker(status_msg)
 
-        # Step 1: Try YouTube captions first (fast)
-        await status_msg.edit_text(_progress_bar(1, 5, "Fetching transcript..."))
+        # Step 1: Transcript (0% -> 10%)
+        await progress.update(2, "Fetching transcript...")
         transcript_result = await asyncio.to_thread(fetch_transcript, video_id)
 
         if transcript_result:
             transcript_text = transcript_result.text
             language_code = transcript_result.language_code
             logger.info(f"Got transcript from YouTube captions ({language_code})")
+            await progress.update(10, "Transcript fetched")
         else:
-            await status_msg.edit_text(_progress_bar(1, 5, "Downloading audio..."))
+            # Fallback path: download + ElevenLabs (0% -> 10% -> 25%)
+            await progress.update(5, "No captions found. Downloading audio...")
             logger.info("No captions available, downloading audio for transcription")
             audio_path = await asyncio.to_thread(download_audio, url)
+            await progress.update(15, "Audio downloaded. Transcribing...")
 
-            await status_msg.edit_text(_progress_bar(2, 5, "Transcribing audio..."))
             transcription = await asyncio.to_thread(
                 transcribe_audio, audio_path, config.elevenlabs_api_key
             )
             transcript_text = transcription.text
             language_code = transcription.language_code
+            await progress.update(25, "Transcription complete")
 
-        # Step 2: Summarize
-        await status_msg.edit_text(_progress_bar(3, 5, "Generating summary..."))
+        # Step 2: Summarize (-> 50%)
+        await progress.update(28, "Generating summary with Claude...")
         summary = await summarize_text(
             transcript_text,
             config.anthropic_api_key,
             model=config.claude_model,
             max_tokens=config.max_tokens,
         )
+        await progress.update(50, "Summary generated")
 
-        # Step 3: Generate voice (chunked for long summaries, parallel)
-        await status_msg.edit_text(_progress_bar(4, 5, "Creating voice message..."))
+        # Step 3: Generate voice (50% -> 95%)
+        await progress.update(52, "Creating voice message...")
         try:
             voice = get_voice_for_language(language_code)
+
+            async def on_chunk_done(completed: int, total: int):
+                chunk_percent = 50 + int(45 * completed / total)
+                await progress.update(
+                    chunk_percent,
+                    f"Generating audio {completed}/{total}..."
+                )
+
             voice_paths = await generate_voice_chunked(
-                summary, "/tmp", video_id, voice=voice
+                summary, "/tmp", video_id, voice=voice,
+                on_chunk_done=on_chunk_done,
             )
         except TTSError as e:
             logger.warning(f"TTS failed, skipping voice: {e}")
 
-        # Step 4: Done — send summary + voice
-        await status_msg.edit_text(_progress_bar(5, 5, "Done!"))
+        # Step 4: Done
+        await progress.update(100, "Done!")
 
-        # Split long text messages
+        # Send text
         message_parts = split_message(summary)
         for part in message_parts:
             await update.message.reply_text(part)
 
-        # Send voice messages
+        # Send voice
         for vp in voice_paths:
             with open(vp, "rb") as voice_file:
                 await update.message.reply_voice(voice=voice_file)
@@ -156,13 +194,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Unexpected error processing {url}: {e}", exc_info=True)
 
     finally:
-        # Clean audio file
         if audio_path and Path(audio_path).exists():
             try:
                 Path(audio_path).unlink()
             except OSError:
                 pass
-        # Clean all voice temp files (both mp3 and ogg)
         for vp in voice_paths:
             for ext_path in [vp, vp.with_suffix(".mp3")]:
                 if ext_path.exists():

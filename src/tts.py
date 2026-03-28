@@ -2,7 +2,7 @@ import asyncio
 import re
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import Callable, Awaitable, List, Optional
 
 import edge_tts
 
@@ -50,6 +50,8 @@ TTS_RATE = "+10%"
 TTS_OGG_BITRATE = "128k"
 TTS_CHUNK_MAX_CHARS = 3000
 
+ProgressCallback = Optional[Callable[[int, int], Awaitable[None]]]
+
 
 def get_voice_for_language(language_code: str) -> str:
     return VOICE_MAP.get(language_code, "en-US-AndrewMultilingualNeural")
@@ -86,7 +88,6 @@ def split_text_chunks(text: str, max_chars: int = TTS_CHUNK_MAX_CHARS) -> List[s
         else:
             if current_chunk:
                 chunks.append(current_chunk.strip())
-            # If a single paragraph exceeds max_chars, split by sentences
             if len(para) > max_chars:
                 sentences = re.split(r"(?<=[.!?])\s+", para)
                 current_chunk = ""
@@ -135,28 +136,31 @@ async def generate_voice_chunked(
     output_dir: str,
     video_id: str,
     voice: str = "en-US-AndrewMultilingualNeural",
+    on_chunk_done: ProgressCallback = None,
 ) -> List[Path]:
-    """Generate voice for long text by splitting into chunks and processing in parallel."""
+    """Generate voice for long text by splitting into chunks.
+
+    Args:
+        on_chunk_done: async callback(completed, total) called after each chunk finishes.
+    """
     clean_text = strip_markdown(text)
     chunks = split_text_chunks(clean_text)
+    total = len(chunks)
 
-    if len(chunks) == 1:
-        out = Path(output_dir) / f"voice_{video_id}.mp3"
-        await generate_voice(chunks[0], out, voice=voice)
-        ogg = convert_to_ogg(out)
-        return [ogg]
+    async def _generate_and_report(i: int, chunk: str, mp3_path: Path):
+        await generate_voice(chunk, mp3_path, voice=voice)
+        if on_chunk_done:
+            await on_chunk_done(i + 1, total)
 
-    # Generate chunks in parallel
-    tasks = []
     mp3_paths = []
     for i, chunk in enumerate(chunks):
         mp3_path = Path(output_dir) / f"voice_{video_id}_part{i}.mp3"
         mp3_paths.append(mp3_path)
-        tasks.append(generate_voice(chunk, mp3_path, voice=voice))
 
-    await asyncio.gather(*tasks)
+    # Generate sequentially so progress updates are meaningful
+    for i, (chunk, mp3_path) in enumerate(zip(chunks, mp3_paths)):
+        await _generate_and_report(i, chunk, mp3_path)
 
-    # Convert all to OGG
     ogg_paths = []
     for mp3_path in mp3_paths:
         ogg_paths.append(convert_to_ogg(mp3_path))
