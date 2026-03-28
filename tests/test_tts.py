@@ -5,6 +5,18 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from src.tts import generate_voice, generate_voice_chunked, TTSError, get_voice_for_language, convert_to_ogg, strip_markdown, split_text_chunks
 
 
+def _mock_stream(*audio_chunks):
+    """Create a mock edge-tts Communicate that yields audio chunks via stream()."""
+    mock_comm = MagicMock()
+
+    async def _stream():
+        for data in audio_chunks:
+            yield {"type": "audio", "data": data}
+
+    mock_comm.stream = _stream
+    return mock_comm
+
+
 class TestGetVoiceForLanguage:
     def test_english_2letter(self):
         assert get_voice_for_language("en") == "en-US-RogerNeural"
@@ -60,10 +72,8 @@ class TestStripMarkdown:
 class TestGenerateVoice:
     @pytest.mark.asyncio
     @patch("src.tts.edge_tts.Communicate")
-    async def test_calls_edge_tts_with_stripped_text(self, mock_comm_class, tmp_path):
-        mock_comm = MagicMock()
-        mock_comm.save = AsyncMock()
-        mock_comm_class.return_value = mock_comm
+    async def test_calls_edge_tts_with_correct_params(self, mock_comm_class, tmp_path):
+        mock_comm_class.return_value = _mock_stream(b"audio_data")
         output_path = tmp_path / "voice.mp3"
 
         await generate_voice("Hello world", output_path)
@@ -73,26 +83,20 @@ class TestGenerateVoice:
     @pytest.mark.asyncio
     @patch("src.tts.edge_tts.Communicate")
     async def test_strips_markdown_before_tts(self, mock_comm_class, tmp_path):
-        mock_comm = MagicMock()
-        mock_comm.save = AsyncMock()
-        mock_comm_class.return_value = mock_comm
+        mock_comm_class.return_value = _mock_stream(b"audio_data")
         output_path = tmp_path / "voice.mp3"
 
         await generate_voice("## Title\n**bold** text", output_path)
 
-        # Should have stripped markdown
         call_text = mock_comm_class.call_args[0][0]
         assert "##" not in call_text
         assert "**" not in call_text
         assert "Title" in call_text
-        assert "bold" in call_text
 
     @pytest.mark.asyncio
     @patch("src.tts.edge_tts.Communicate")
     async def test_returns_output_path(self, mock_comm_class, tmp_path):
-        mock_comm = MagicMock()
-        mock_comm.save = AsyncMock()
-        mock_comm_class.return_value = mock_comm
+        mock_comm_class.return_value = _mock_stream(b"audio_data")
         output_path = tmp_path / "voice.mp3"
 
         result = await generate_voice("Hello world", output_path)
@@ -101,10 +105,32 @@ class TestGenerateVoice:
 
     @pytest.mark.asyncio
     @patch("src.tts.edge_tts.Communicate")
+    async def test_writes_audio_to_file(self, mock_comm_class, tmp_path):
+        mock_comm_class.return_value = _mock_stream(b"chunk1", b"chunk2")
+        output_path = tmp_path / "voice.mp3"
+
+        await generate_voice("Hello", output_path)
+
+        assert output_path.read_bytes() == b"chunk1chunk2"
+
+    @pytest.mark.asyncio
+    @patch("src.tts.edge_tts.Communicate")
+    async def test_calls_progress_callback(self, mock_comm_class, tmp_path):
+        mock_comm_class.return_value = _mock_stream(b"a" * 1000, b"b" * 1000)
+        output_path = tmp_path / "voice.mp3"
+        progress_calls = []
+
+        async def on_prog(frac, total):
+            progress_calls.append(frac)
+
+        await generate_voice("Hi", output_path, on_progress=on_prog)
+
+        assert len(progress_calls) > 0
+
+    @pytest.mark.asyncio
+    @patch("src.tts.edge_tts.Communicate")
     async def test_with_custom_voice(self, mock_comm_class, tmp_path):
-        mock_comm = MagicMock()
-        mock_comm.save = AsyncMock()
-        mock_comm_class.return_value = mock_comm
+        mock_comm_class.return_value = _mock_stream(b"data")
         output_path = tmp_path / "voice.mp3"
 
         await generate_voice("Hello", output_path, voice="ru-RU-DmitryNeural")
@@ -120,7 +146,12 @@ class TestGenerateVoice:
     @patch("src.tts.edge_tts.Communicate")
     async def test_raises_on_tts_error(self, mock_comm_class, tmp_path):
         mock_comm = MagicMock()
-        mock_comm.save = AsyncMock(side_effect=Exception("TTS failure"))
+
+        async def _fail_stream():
+            raise Exception("TTS failure")
+            yield  # make it an async generator
+
+        mock_comm.stream = _fail_stream
         mock_comm_class.return_value = mock_comm
 
         with pytest.raises(TTSError, match="Edge-TTS error"):

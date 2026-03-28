@@ -109,22 +109,44 @@ def split_text_chunks(text: str, max_chars: int = TTS_CHUNK_MAX_CHARS) -> List[s
     return chunks
 
 
+# Approximate bytes of mp3 audio per character of text (empirical)
+BYTES_PER_CHAR_ESTIMATE = 300
+
+
 async def generate_voice(
     text: str,
     output_path: Path,
     voice: str = "en-US-RogerNeural",
+    on_progress: ProgressCallback = None,
 ) -> Path:
     if not text or not text.strip():
         raise ValueError("Cannot generate voice from empty text")
 
     clean_text = strip_markdown(text)
     last_error = None
+    expected_bytes = len(clean_text) * BYTES_PER_CHAR_ESTIMATE
 
     for attempt in range(TTS_MAX_RETRIES + 1):
         try:
             communicate = edge_tts.Communicate(clean_text, voice, rate=TTS_RATE)
+
+            async def _stream_save():
+                audio_bytes = 0
+                last_pct = -1
+                with open(output_path, "wb") as f:
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            f.write(chunk["data"])
+                            audio_bytes += len(chunk["data"])
+                            if on_progress and expected_bytes > 0:
+                                pct = min(audio_bytes / expected_bytes, 0.99)
+                                pct_int = int(pct * 100)
+                                if pct_int > last_pct:
+                                    last_pct = pct_int
+                                    await on_progress(pct, 1.0)
+
             await asyncio.wait_for(
-                communicate.save(str(output_path)),
+                _stream_save(),
                 timeout=TTS_TIMEOUT_SECONDS,
             )
             return output_path
@@ -132,7 +154,6 @@ async def generate_voice(
             last_error = f"TTS timed out after {TTS_TIMEOUT_SECONDS}s (attempt {attempt + 1})"
         except Exception as e:
             last_error = f"Edge-TTS error: {e}"
-        # Brief pause before retry
         if attempt < TTS_MAX_RETRIES:
             await asyncio.sleep(1)
 
@@ -144,24 +165,35 @@ async def generate_voice_chunked(
     output_dir: str,
     video_id: str,
     voice: str = "en-US-RogerNeural",
-    on_chunk_done: ProgressCallback = None,
+    on_progress: ProgressCallback = None,
 ) -> List[Path]:
-    """Generate voice for long text by splitting into chunks.
+    """Generate voice with fine-grained progress reporting.
 
     Args:
-        on_chunk_done: async callback(completed, total) called after each chunk finishes.
+        on_progress: async callback(completed_fraction, total=1.0) called frequently
+                     during audio generation with values from 0.0 to 1.0.
     """
     clean_text = strip_markdown(text)
     chunks = split_text_chunks(clean_text)
-    total = len(chunks)
+    total_chunks = len(chunks)
+
+    async def _chunk_progress(chunk_idx: int, frac_within_chunk: float, _total: float):
+        if on_progress:
+            overall = (chunk_idx + frac_within_chunk) / total_chunks
+            await on_progress(overall, 1.0)
 
     mp3_paths = []
     for i, chunk in enumerate(chunks):
         mp3_path = Path(output_dir) / f"voice_{video_id}_part{i}.mp3"
         mp3_paths.append(mp3_path)
-        await generate_voice(chunk, mp3_path, voice=voice)
-        if on_chunk_done:
-            await on_chunk_done(i + 1, total)
+
+        async def _inner_progress(frac, _t, idx=i):
+            await _chunk_progress(idx, frac, _t)
+
+        await generate_voice(chunk, mp3_path, voice=voice, on_progress=_inner_progress)
+        # Report chunk fully done
+        if on_progress:
+            await on_progress((i + 1) / total_chunks, 1.0)
 
     ogg_paths = []
     for mp3_path in mp3_paths:

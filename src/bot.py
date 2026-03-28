@@ -152,16 +152,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             voice = get_voice_for_language(language_code)
 
-            async def on_chunk_done(completed: int, total: int):
-                chunk_percent = 50 + int(45 * completed / total)
-                await progress.update(
-                    chunk_percent,
-                    f"Generating audio {completed}/{total}..."
-                )
+            async def on_voice_progress(fraction: float, _total: float):
+                pct = 52 + int(43 * fraction)
+                await progress.update(pct, f"Generating audio... {int(fraction * 100)}%")
 
             voice_paths = await generate_voice_chunked(
                 summary, "/tmp", video_id, voice=voice,
-                on_chunk_done=on_chunk_done,
+                on_progress=on_voice_progress,
             )
         except TTSError as e:
             logger.warning(f"TTS failed, skipping voice: {e}")
