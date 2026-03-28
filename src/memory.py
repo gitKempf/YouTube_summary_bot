@@ -43,15 +43,28 @@ class MemoryManager:
             "version": "v1.1",
         }
 
-        # Qdrant in-memory vector store (zero config, persistent via disk)
+        # Qdrant: use server mode if available, otherwise local disk
+        qdrant_config = {
+            "collection_name": "youtube_bot_memories",
+            "embedding_model_dims": 384,
+        }
+        try:
+            import socket
+            s = socket.socket()
+            s.settimeout(2)
+            s.connect(("localhost", 6333))
+            s.close()
+            qdrant_config["host"] = "localhost"
+            qdrant_config["port"] = 6333
+            logger.info("Using Qdrant server mode (concurrent-safe)")
+        except Exception:
+            qdrant_config["on_disk"] = True
+            qdrant_config["path"] = "/tmp/mem0_qdrant"
+            logger.info("Using Qdrant local mode (singleton required)")
+
         mem0_config["vector_store"] = {
             "provider": "qdrant",
-            "config": {
-                "collection_name": "youtube_bot_memories",
-                "embedding_model_dims": 384,
-                "on_disk": True,
-                "path": "/tmp/mem0_qdrant",
-            },
+            "config": qdrant_config,
         }
 
         self._memory = Memory.from_config(config_dict=mem0_config)

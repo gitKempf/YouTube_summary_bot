@@ -183,28 +183,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Step 2: Memory — fact check & retrieve context (10% -> 20%)
         past_context = None
         fact_check_result = None
-        memory_mgr = None
+        memory_mgr = context.bot_data.get("memory_mgr")
         user_mem_id = f"tg_{update.effective_user.id}"
 
-        if config.memory_enabled:
+        if config.memory_enabled and memory_mgr:
             try:
                 await progress.update(12, "Analyzing topics...")
-                memory_mgr = MemoryManager(config)
+                logger.info(f"[MEMORY] Extracting claims for user {user_mem_id}")
                 claims = await extract_claims(
                     transcript_text, config.anthropic_api_key, config.claude_model
                 )
+                logger.info(f"[MEMORY] Extracted {len(claims)} claims")
+                for c in claims[:5]:
+                    logger.info(f"[MEMORY]   claim: {c.text[:80]}")
+
                 await progress.update(15, "Searching your memory...")
                 memories = await memory_mgr.search(
                     transcript_text[:500], user_id=user_mem_id
                 )
+                logger.info(f"[MEMORY] Found {len(memories)} past memories")
+                for m in memories[:5]:
+                    logger.info(f"[MEMORY]   memory: {m.text[:80]}")
+
                 await progress.update(18, "Checking what's new...")
                 fact_check_result = await classify_claims(
                     claims, memories, config.anthropic_api_key, config.claude_model
                 )
+                logger.info(
+                    f"[MEMORY] Classification: {len(fact_check_result.new_claims)} new, "
+                    f"{len(fact_check_result.supported_claims)} supported, "
+                    f"{len(fact_check_result.contradicted_claims)} contradicted"
+                )
                 past_context = build_context_prompt(fact_check_result)
+                if past_context:
+                    logger.info(f"[MEMORY] Context prompt ({len(past_context)} chars):\n{past_context[:500]}")
+                else:
+                    logger.info("[MEMORY] No context to inject (all new or empty)")
                 await progress.update(20, "Context ready")
             except Exception as e:
-                logger.warning(f"Memory system error, proceeding without context: {e}")
+                logger.warning(f"Memory system error, proceeding without context: {e}", exc_info=True)
                 past_context = None
                 fact_check_result = None
 
@@ -244,8 +261,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 if new_facts:
                     await memory_mgr.add(new_facts, user_id=user_mem_id)
+                    logger.info(f"[MEMORY] Stored {len(fact_check_result.new_claims)} new facts for {user_mem_id}")
+                else:
+                    logger.info("[MEMORY] No new facts to store")
             except Exception as e:
-                logger.warning(f"Failed to store memories: {e}")
+                logger.warning(f"Failed to store memories: {e}", exc_info=True)
 
         # Step 5: Done
         await progress.update(100, "Done!")
@@ -292,6 +312,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def create_app():
     config = get_config()
     app = ApplicationBuilder().token(config.telegram_bot_token).build()
+
+    if config.memory_enabled:
+        try:
+            mgr = MemoryManager(config)
+            app.bot_data["memory_mgr"] = mgr
+            logger.info("Memory system initialized (singleton)")
+        except Exception as e:
+            logger.warning(f"Failed to init memory system: {e}")
+
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("id", id_command))
     app.add_handler(
