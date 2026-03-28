@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from src.tts import generate_voice, TTSError, get_voice_for_language, convert_to_ogg, strip_markdown
+from src.tts import generate_voice, generate_voice_chunked, TTSError, get_voice_for_language, convert_to_ogg, strip_markdown, split_text_chunks
 
 
 class TestGetVoiceForLanguage:
@@ -68,7 +68,7 @@ class TestGenerateVoice:
 
         await generate_voice("Hello world", output_path)
 
-        mock_comm_class.assert_called_once_with("Hello world", "en-US-AndrewMultilingualNeural", rate="-5%")
+        mock_comm_class.assert_called_once_with("Hello world", "en-US-AndrewMultilingualNeural", rate="+10%")
 
     @pytest.mark.asyncio
     @patch("src.tts.edge_tts.Communicate")
@@ -109,7 +109,7 @@ class TestGenerateVoice:
 
         await generate_voice("Hello", output_path, voice="ru-RU-DmitryNeural")
 
-        mock_comm_class.assert_called_once_with("Hello", "ru-RU-DmitryNeural", rate="-5%")
+        mock_comm_class.assert_called_once_with("Hello", "ru-RU-DmitryNeural", rate="+10%")
 
     @pytest.mark.asyncio
     async def test_raises_on_empty_text(self, tmp_path):
@@ -125,6 +125,32 @@ class TestGenerateVoice:
 
         with pytest.raises(TTSError, match="Edge-TTS error"):
             await generate_voice("Hello", tmp_path / "voice.mp3")
+
+
+class TestSplitTextChunks:
+    def test_short_text_single_chunk(self):
+        result = split_text_chunks("Hello world", max_chars=100)
+        assert result == ["Hello world"]
+
+    def test_splits_at_paragraph_boundary(self):
+        text = "Paragraph one.\n\nParagraph two.\n\nParagraph three."
+        result = split_text_chunks(text, max_chars=30)
+        assert len(result) >= 2
+        assert "Paragraph one." in result[0]
+
+    def test_long_paragraph_splits_by_sentences(self):
+        text = "First sentence. Second sentence. Third sentence. Fourth sentence."
+        result = split_text_chunks(text, max_chars=40)
+        assert len(result) >= 2
+        for chunk in result:
+            assert len(chunk) <= 40 or "." in chunk
+
+    def test_preserves_all_content(self):
+        text = "A\n\nB\n\nC\n\nD\n\nE"
+        result = split_text_chunks(text, max_chars=5)
+        combined = " ".join(result)
+        for letter in "ABCDE":
+            assert letter in combined
 
 
 class TestConvertToOgg:

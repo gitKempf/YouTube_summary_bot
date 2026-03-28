@@ -2,6 +2,7 @@ import asyncio
 import re
 import subprocess
 from pathlib import Path
+from typing import List
 
 import edge_tts
 
@@ -44,9 +45,10 @@ VOICE_MAP = {
     "tur": "tr-TR-AhmetNeural",
 }
 
-TTS_TIMEOUT_SECONDS = 120
-TTS_RATE = "-5%"
+TTS_TIMEOUT_SECONDS = 180
+TTS_RATE = "+10%"
 TTS_OGG_BITRATE = "128k"
+TTS_CHUNK_MAX_CHARS = 3000
 
 
 def get_voice_for_language(language_code: str) -> str:
@@ -65,9 +67,43 @@ def strip_markdown(text: str) -> str:
     text = re.sub(r"^\s*\d+\.\s+", "", text, flags=re.MULTILINE)
     text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", text)
     text = re.sub(r"---+", "", text)
-    # Collapse multiple newlines
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def split_text_chunks(text: str, max_chars: int = TTS_CHUNK_MAX_CHARS) -> List[str]:
+    """Split text into chunks at paragraph boundaries, respecting max_chars."""
+    if len(text) <= max_chars:
+        return [text]
+
+    chunks = []
+    paragraphs = text.split("\n\n")
+    current_chunk = ""
+
+    for para in paragraphs:
+        if len(current_chunk) + len(para) + 2 <= max_chars:
+            current_chunk = current_chunk + "\n\n" + para if current_chunk else para
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            # If a single paragraph exceeds max_chars, split by sentences
+            if len(para) > max_chars:
+                sentences = re.split(r"(?<=[.!?])\s+", para)
+                current_chunk = ""
+                for sent in sentences:
+                    if len(current_chunk) + len(sent) + 1 <= max_chars:
+                        current_chunk = current_chunk + " " + sent if current_chunk else sent
+                    else:
+                        if current_chunk:
+                            chunks.append(current_chunk.strip())
+                        current_chunk = sent
+            else:
+                current_chunk = para
+
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+
+    return chunks
 
 
 async def generate_voice(
@@ -92,6 +128,40 @@ async def generate_voice(
         raise TTSError(f"Edge-TTS error: {e}") from e
 
     return output_path
+
+
+async def generate_voice_chunked(
+    text: str,
+    output_dir: str,
+    video_id: str,
+    voice: str = "en-US-AndrewMultilingualNeural",
+) -> List[Path]:
+    """Generate voice for long text by splitting into chunks and processing in parallel."""
+    clean_text = strip_markdown(text)
+    chunks = split_text_chunks(clean_text)
+
+    if len(chunks) == 1:
+        out = Path(output_dir) / f"voice_{video_id}.mp3"
+        await generate_voice(chunks[0], out, voice=voice)
+        ogg = convert_to_ogg(out)
+        return [ogg]
+
+    # Generate chunks in parallel
+    tasks = []
+    mp3_paths = []
+    for i, chunk in enumerate(chunks):
+        mp3_path = Path(output_dir) / f"voice_{video_id}_part{i}.mp3"
+        mp3_paths.append(mp3_path)
+        tasks.append(generate_voice(chunk, mp3_path, voice=voice))
+
+    await asyncio.gather(*tasks)
+
+    # Convert all to OGG
+    ogg_paths = []
+    for mp3_path in mp3_paths:
+        ogg_paths.append(convert_to_ogg(mp3_path))
+
+    return ogg_paths
 
 
 def convert_to_ogg(mp3_path: Path) -> Path:

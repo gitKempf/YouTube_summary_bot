@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from typing import List
 
 from telegram import Update
 from telegram.ext import (
@@ -15,17 +16,11 @@ from src.config import get_config
 from src.downloader import download_audio, extract_video_id, fetch_transcript
 from src.transcriber import transcribe_audio, TranscriptionError
 from src.summarizer import summarize_text, SummarizationError
-from src.tts import generate_voice, convert_to_ogg, get_voice_for_language, TTSError
+from src.tts import generate_voice_chunked, get_voice_for_language, TTSError
 
 logger = logging.getLogger(__name__)
 
-PROGRESS_STEPS = [
-    "Fetching transcript...",
-    "Downloading audio...",
-    "Transcribing audio...",
-    "Generating summary...",
-    "Creating voice message...",
-]
+TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 
 
 def _progress_bar(step: int, total: int, label: str) -> str:
@@ -34,6 +29,44 @@ def _progress_bar(step: int, total: int, label: str) -> str:
     bar = "\u2593" * filled + "\u2591" * empty
     percent = int(step / total * 100)
     return f"{bar} {percent}%\n{label}"
+
+
+def split_message(text: str, max_length: int = TELEGRAM_MAX_MESSAGE_LENGTH) -> List[str]:
+    """Split a long message into Telegram-safe chunks at paragraph boundaries."""
+    if len(text) <= max_length:
+        return [text]
+
+    chunks = []
+    paragraphs = text.split("\n\n")
+    current = ""
+
+    for para in paragraphs:
+        if len(current) + len(para) + 2 <= max_length:
+            current = current + "\n\n" + para if current else para
+        else:
+            if current:
+                chunks.append(current)
+            if len(para) > max_length:
+                # Hard split on sentence boundaries
+                while len(para) > max_length:
+                    cut = para[:max_length].rfind(". ")
+                    if cut == -1:
+                        cut = max_length
+                    else:
+                        cut += 1
+                    chunks.append(para[:cut])
+                    para = para[cut:].strip()
+                if para:
+                    current = para
+                else:
+                    current = ""
+            else:
+                current = para
+
+    if current:
+        chunks.append(current)
+
+    return chunks
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -47,12 +80,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text
     config = get_config()
     audio_path = None
-    voice_path = None
+    voice_paths: List[Path] = []
 
     try:
         video_id = extract_video_id(url)
 
-        # Send initial progress message that we'll edit throughout
         status_msg = await update.message.reply_text(
             _progress_bar(0, 5, "Starting...")
         )
@@ -66,7 +98,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             language_code = transcript_result.language_code
             logger.info(f"Got transcript from YouTube captions ({language_code})")
         else:
-            # Fallback: download audio + ElevenLabs STT
             await status_msg.edit_text(_progress_bar(1, 5, "Downloading audio..."))
             logger.info("No captions available, downloading audio for transcription")
             audio_path = await asyncio.to_thread(download_audio, url)
@@ -87,24 +118,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             max_tokens=config.max_tokens,
         )
 
-        # Step 3: Generate voice
+        # Step 3: Generate voice (chunked for long summaries, parallel)
         await status_msg.edit_text(_progress_bar(4, 5, "Creating voice message..."))
-        voice_sent = False
         try:
             voice = get_voice_for_language(language_code)
-            voice_mp3 = Path(f"/tmp/voice_{video_id}.mp3")
-            await generate_voice(summary, voice_mp3, voice=voice)
-            voice_path = convert_to_ogg(voice_mp3)
-            voice_sent = True
+            voice_paths = await generate_voice_chunked(
+                summary, "/tmp", video_id, voice=voice
+            )
         except TTSError as e:
             logger.warning(f"TTS failed, skipping voice: {e}")
 
-        # Step 4: Done — replace progress with summary
+        # Step 4: Done — send summary + voice
         await status_msg.edit_text(_progress_bar(5, 5, "Done!"))
-        await update.message.reply_text(summary)
 
-        if voice_sent and voice_path:
-            with open(voice_path, "rb") as voice_file:
+        # Split long text messages
+        message_parts = split_message(summary)
+        for part in message_parts:
+            await update.message.reply_text(part)
+
+        # Send voice messages
+        for vp in voice_paths:
+            with open(vp, "rb") as voice_file:
                 await update.message.reply_voice(voice=voice_file)
 
     except (ValueError, TranscriptionError, SummarizationError) as e:
@@ -122,20 +156,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Unexpected error processing {url}: {e}", exc_info=True)
 
     finally:
-        for path in [audio_path, voice_path]:
-            if path and Path(path).exists():
-                try:
-                    Path(path).unlink()
-                except OSError:
-                    pass
-        # Also clean up the mp3 voice file if ogg was created
-        if voice_path:
-            mp3_path = voice_path.with_suffix(".mp3")
-            if mp3_path.exists():
-                try:
-                    mp3_path.unlink()
-                except OSError:
-                    pass
+        # Clean audio file
+        if audio_path and Path(audio_path).exists():
+            try:
+                Path(audio_path).unlink()
+            except OSError:
+                pass
+        # Clean all voice temp files (both mp3 and ogg)
+        for vp in voice_paths:
+            for ext_path in [vp, vp.with_suffix(".mp3")]:
+                if ext_path.exists():
+                    try:
+                        ext_path.unlink()
+                    except OSError:
+                        pass
 
 
 def create_app():

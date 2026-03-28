@@ -55,9 +55,8 @@ class TestFullPipeline:
              patch("src.bot.summarize_text", new_callable=AsyncMock,
                    return_value="Complete summary") as mock_sum, \
              patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
-             patch("src.bot.generate_voice", new_callable=AsyncMock,
-                   return_value=Path("/tmp/voice.mp3")) as mock_voice, \
-             patch("src.bot.convert_to_ogg", return_value=Path("/tmp/voice.ogg")), \
+             patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
+                   return_value=[Path("/tmp/voice.ogg")]) as mock_voice, \
              patch("builtins.open", MagicMock()), \
              patch("src.bot.Path.exists", return_value=False), \
              patch("src.bot.Path.unlink"):
@@ -67,7 +66,6 @@ class TestFullPipeline:
         mock_voice.assert_awaited_once()
         assert any("Complete summary" in str(c) for c in mock_update.message.reply_text.call_args_list)
         mock_update.message.reply_voice.assert_awaited_once()
-        # Progress bar was updated
         assert mock_status_msg.edit_text.await_count >= 3
 
     @pytest.mark.asyncio
@@ -75,17 +73,13 @@ class TestFullPipeline:
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
-                   side_effect=[
-                       None,
-                       Path("/tmp/audio.mp4"),
-                       TranscriptionResult(text="EL text", language_code="fr"),
-                   ]), \
+                   side_effect=[None, Path("/tmp/audio.mp4"),
+                                TranscriptionResult(text="EL text", language_code="fr")]), \
              patch("src.bot.summarize_text", new_callable=AsyncMock,
                    return_value="Summary") as mock_sum, \
              patch("src.bot.get_voice_for_language", return_value="fr-FR-HenriNeural"), \
-             patch("src.bot.generate_voice", new_callable=AsyncMock,
-                   return_value=Path("/tmp/voice.mp3")), \
-             patch("src.bot.convert_to_ogg", return_value=Path("/tmp/voice.ogg")), \
+             patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
+                   return_value=[Path("/tmp/voice.ogg")]), \
              patch("builtins.open", MagicMock()), \
              patch("src.bot.Path.exists", return_value=False), \
              patch("src.bot.Path.unlink"):
@@ -102,7 +96,7 @@ class TestFullPipeline:
                    return_value=TranscriptFetchResult(text="Text", language_code="en")), \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary"), \
              patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
-             patch("src.bot.generate_voice", new_callable=AsyncMock,
+             patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
                    side_effect=TTSError("TTS failed")), \
              patch("src.bot.Path.exists", return_value=False), \
              patch("src.bot.Path.unlink"):
@@ -116,11 +110,8 @@ class TestFullPipeline:
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
-                   side_effect=[
-                       None,
-                       Path("/tmp/audio.mp4"),
-                       TranscriptionResult(text="Text", language_code="en"),
-                   ]), \
+                   side_effect=[None, Path("/tmp/audio.mp4"),
+                                TranscriptionResult(text="Text", language_code="en")]), \
              patch("src.bot.summarize_text", new_callable=AsyncMock,
                    side_effect=SummarizationError("Failed")), \
              patch("src.bot.Path.exists", return_value=True), \
