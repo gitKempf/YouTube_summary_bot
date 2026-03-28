@@ -38,7 +38,37 @@ def test_config_has_defaults(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-el-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-ant-key")
+    monkeypatch.delenv("ALLOWED_USER_IDS", raising=False)
     config = get_config()
     assert config.tts_voice == "en-US-RogerNeural"
     assert config.claude_model == "claude-sonnet-4-6"
     assert config.max_tokens == 4096
+    assert config.allowed_user_ids == frozenset()
+
+
+def test_config_loads_allowed_user_ids(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-el-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-ant-key")
+    monkeypatch.setenv("ALLOWED_USER_IDS", "123,456,789")
+    config = get_config()
+    assert config.allowed_user_ids == frozenset({123, 456, 789})
+
+
+def test_is_user_allowed_empty_whitelist(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "e")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    monkeypatch.delenv("ALLOWED_USER_IDS", raising=False)
+    config = get_config()
+    assert config.is_user_allowed(999) is True
+
+
+def test_is_user_allowed_in_whitelist(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "e")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    monkeypatch.setenv("ALLOWED_USER_IDS", "123,456")
+    config = get_config()
+    assert config.is_user_allowed(123) is True
+    assert config.is_user_allowed(999) is False

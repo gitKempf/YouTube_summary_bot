@@ -18,6 +18,7 @@ def mock_config():
     config.tts_voice = "en-US-RogerNeural"
     config.claude_model = "claude-sonnet-4-6"
     config.max_tokens = 4096
+    config.is_user_allowed.return_value = True
     return config
 
 
@@ -112,6 +113,27 @@ class TestSplitMessage:
         combined = "\n\n".join(parts)
         for i in range(20):
             assert f"Paragraph {i}." in combined
+
+
+class TestAccessControl:
+    @pytest.mark.asyncio
+    async def test_unauthorized_user_blocked(self, mock_update, mock_context):
+        mock_update.effective_user.id = 999
+        mock_config = MagicMock()
+        mock_config.is_user_allowed.return_value = False
+        with patch("src.bot.get_config", return_value=mock_config):
+            await start_command(mock_update, mock_context)
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "not authorized" in call_text
+
+    @pytest.mark.asyncio
+    async def test_authorized_user_allowed(self, mock_update, mock_context):
+        mock_config = MagicMock()
+        mock_config.is_user_allowed.return_value = True
+        with patch("src.bot.get_config", return_value=mock_config):
+            await start_command(mock_update, mock_context)
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "Welcome" in call_text
 
 
 class TestStartCommand:

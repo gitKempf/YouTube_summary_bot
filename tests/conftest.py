@@ -19,6 +19,8 @@ def mock_update(mock_status_msg):
     update.message.chat_id = 12345
     update.effective_chat = MagicMock()
     update.effective_chat.id = 12345
+    update.effective_user = MagicMock()
+    update.effective_user.id = 12345
     return update
 
 

@@ -18,6 +18,7 @@ def mock_config():
     config.tts_voice = "en-US-RogerNeural"
     config.claude_model = "claude-sonnet-4-6"
     config.max_tokens = 4096
+    config.is_user_allowed.return_value = True
     return config
 
 
@@ -37,6 +38,8 @@ def mock_update(mock_status_msg):
     update.message.reply_voice = AsyncMock()
     update.effective_chat = MagicMock()
     update.effective_chat.id = 12345
+    update.effective_user = MagicMock()
+    update.effective_user.id = 12345
     return update
 
 

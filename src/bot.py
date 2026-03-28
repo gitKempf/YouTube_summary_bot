@@ -93,7 +93,25 @@ class ProgressTracker:
                 pass  # Telegram rate limit or message unchanged
 
 
+async def _check_access(update: Update) -> bool:
+    config = get_config()
+    user_id = update.effective_user.id
+    if not config.is_user_allowed(user_id):
+        logger.warning(f"Unauthorized access attempt by user {user_id}")
+        await update.message.reply_text("Sorry, you are not authorized to use this bot.")
+        return False
+    return True
+
+
+async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send the user their Telegram ID so they can add themselves to the whitelist."""
+    user_id = update.effective_user.id
+    await update.message.reply_text(f"Your Telegram user ID: {user_id}")
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     await update.message.reply_text(
         "Welcome! Send me a YouTube video link and I'll create a summary for you.\n"
         "You'll receive both a text summary and a voice message."
@@ -101,6 +119,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _check_access(update):
+        return
     url = update.message.text
     config = get_config()
     audio_path = None
@@ -209,6 +229,7 @@ def create_app():
     config = get_config()
     app = ApplicationBuilder().token(config.telegram_bot_token).build()
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("id", id_command))
     app.add_handler(
         MessageHandler(
             filters.TEXT
