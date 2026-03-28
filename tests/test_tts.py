@@ -7,10 +7,10 @@ from src.tts import generate_voice, TTSError, get_voice_for_language, convert_to
 
 class TestGetVoiceForLanguage:
     def test_english_2letter(self):
-        assert get_voice_for_language("en") == "en-US-GuyNeural"
+        assert get_voice_for_language("en") == "en-US-AndrewMultilingualNeural"
 
     def test_english_3letter(self):
-        assert get_voice_for_language("eng") == "en-US-GuyNeural"
+        assert get_voice_for_language("eng") == "en-US-AndrewMultilingualNeural"
 
     def test_russian_2letter(self):
         assert get_voice_for_language("ru") == "ru-RU-DmitryNeural"
@@ -28,7 +28,7 @@ class TestGetVoiceForLanguage:
         assert get_voice_for_language("de") == "de-DE-ConradNeural"
 
     def test_unknown_falls_back_to_english(self):
-        assert get_voice_for_language("xx") == "en-US-GuyNeural"
+        assert get_voice_for_language("xx") == "en-US-AndrewMultilingualNeural"
 
 
 class TestStripMarkdown:
@@ -68,7 +68,7 @@ class TestGenerateVoice:
 
         await generate_voice("Hello world", output_path)
 
-        mock_comm_class.assert_called_once_with("Hello world", "en-US-GuyNeural")
+        mock_comm_class.assert_called_once_with("Hello world", "en-US-AndrewMultilingualNeural", rate="-5%")
 
     @pytest.mark.asyncio
     @patch("src.tts.edge_tts.Communicate")
@@ -109,7 +109,7 @@ class TestGenerateVoice:
 
         await generate_voice("Hello", output_path, voice="ru-RU-DmitryNeural")
 
-        mock_comm_class.assert_called_once_with("Hello", "ru-RU-DmitryNeural")
+        mock_comm_class.assert_called_once_with("Hello", "ru-RU-DmitryNeural", rate="-5%")
 
     @pytest.mark.asyncio
     async def test_raises_on_empty_text(self, tmp_path):

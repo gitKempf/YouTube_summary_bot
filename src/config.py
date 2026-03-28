@@ -10,7 +10,7 @@ class Config:
     telegram_bot_token: str
     elevenlabs_api_key: str
     anthropic_api_key: str
-    tts_voice: str = "en-US-GuyNeural"
+    tts_voice: str = "en-US-AndrewMultilingualNeural"
     claude_model: str = "claude-sonnet-4-6"
     max_tokens: int = 4096
 

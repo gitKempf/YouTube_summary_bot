@@ -15,7 +15,7 @@ def mock_config():
     config.telegram_bot_token = "fake-token"
     config.elevenlabs_api_key = "fake-el-key"
     config.anthropic_api_key = "fake-ant-key"
-    config.tts_voice = "en-US-GuyNeural"
+    config.tts_voice = "en-US-AndrewMultilingualNeural"
     config.claude_model = "claude-sonnet-4-6"
     config.max_tokens = 4096
     return config
@@ -66,7 +66,7 @@ class TestHandleMessageWithCaptions:
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    return_value=TranscriptFetchResult(text="Transcript", language_code="en")), \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary"), \
-             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
              patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
              patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
              patch("builtins.open", MagicMock()), \
@@ -86,7 +86,7 @@ class TestHandleMessageWithCaptions:
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    return_value=TranscriptFetchResult(text="Caption text", language_code="en")) as mock_thread, \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary") as mock_sum, \
-             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
              patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
              patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
              patch("builtins.open", MagicMock()), \
@@ -107,7 +107,7 @@ class TestHandleMessageWithCaptions:
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    return_value=TranscriptFetchResult(text="Text", language_code="en")), \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary text"), \
-             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
              patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
              patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
              patch("builtins.open", MagicMock()), \
@@ -127,7 +127,7 @@ class TestHandleMessageWithCaptions:
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    return_value=TranscriptFetchResult(text="Text", language_code="en")), \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary"), \
-             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
              patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
              patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
              patch("builtins.open", MagicMock()), \
@@ -171,7 +171,7 @@ class TestHandleMessageFallbackToElevenLabs:
                        TranscriptionResult(text="EL transcript", language_code="en"),
                    ]) as mock_thread, \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary") as mock_sum, \
-             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
              patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
              patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
              patch("builtins.open", MagicMock()), \
@@ -241,7 +241,7 @@ class TestHandleMessageErrors:
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    return_value=TranscriptFetchResult(text="Text", language_code="en")), \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary text"), \
-             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
              patch("src.bot.generate_voice", new_callable=AsyncMock, side_effect=TTSError("Failed")), \
              patch("src.bot.Path.exists", return_value=False), \
              patch("src.bot.Path.unlink"):

@@ -10,9 +10,10 @@ class TTSError(Exception):
     pass
 
 
+# Upgraded to Multilingual/Copilot-grade voices where available (more natural)
 VOICE_MAP = {
-    "en": "en-US-GuyNeural",
-    "eng": "en-US-GuyNeural",
+    "en": "en-US-AndrewMultilingualNeural",
+    "eng": "en-US-AndrewMultilingualNeural",
     "ru": "ru-RU-DmitryNeural",
     "rus": "ru-RU-DmitryNeural",
     "es": "es-ES-AlvaroNeural",
@@ -44,10 +45,12 @@ VOICE_MAP = {
 }
 
 TTS_TIMEOUT_SECONDS = 120
+TTS_RATE = "-5%"
+TTS_OGG_BITRATE = "128k"
 
 
 def get_voice_for_language(language_code: str) -> str:
-    return VOICE_MAP.get(language_code, "en-US-GuyNeural")
+    return VOICE_MAP.get(language_code, "en-US-AndrewMultilingualNeural")
 
 
 def strip_markdown(text: str) -> str:
@@ -70,7 +73,7 @@ def strip_markdown(text: str) -> str:
 async def generate_voice(
     text: str,
     output_path: Path,
-    voice: str = "en-US-GuyNeural",
+    voice: str = "en-US-AndrewMultilingualNeural",
 ) -> Path:
     if not text or not text.strip():
         raise ValueError("Cannot generate voice from empty text")
@@ -78,7 +81,7 @@ async def generate_voice(
     clean_text = strip_markdown(text)
 
     try:
-        communicate = edge_tts.Communicate(clean_text, voice)
+        communicate = edge_tts.Communicate(clean_text, voice, rate=TTS_RATE)
         await asyncio.wait_for(
             communicate.save(str(output_path)),
             timeout=TTS_TIMEOUT_SECONDS,
@@ -95,7 +98,7 @@ def convert_to_ogg(mp3_path: Path) -> Path:
     ogg_path = mp3_path.with_suffix(".ogg")
     cmd = [
         "ffmpeg", "-y", "-i", str(mp3_path),
-        "-c:a", "libopus", "-b:a", "64k",
+        "-c:a", "libopus", "-b:a", TTS_OGG_BITRATE,
         str(ogg_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
