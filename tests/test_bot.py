@@ -1,8 +1,9 @@
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock, call
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.bot import start_command, handle_message
+from src.downloader import TranscriptFetchResult
 from src.transcriber import TranscriptionError, TranscriptionResult
 from src.summarizer import SummarizationError
 from src.tts import TTSError
@@ -20,42 +21,6 @@ def mock_config():
     return config
 
 
-def _patch_pipeline(mock_config):
-    """Return a dict of patchers for the full pipeline."""
-    return {
-        "config": patch("src.bot.get_config", return_value=mock_config),
-        "download": patch(
-            "src.bot.download_audio",
-            return_value=Path("/tmp/audio_dQw4w9WgXcQ.mp3"),
-        ),
-        "transcribe": patch(
-            "src.bot.transcribe_audio",
-            return_value=TranscriptionResult(text="Transcript text", language_code="en"),
-        ),
-        "summarize": patch(
-            "src.bot.summarize_text",
-            new_callable=AsyncMock,
-            return_value="Summary text",
-        ),
-        "generate_voice": patch(
-            "src.bot.generate_voice",
-            new_callable=AsyncMock,
-            return_value=Path("/tmp/voice_dQw4w9WgXcQ.ogg"),
-        ),
-        "convert_ogg": patch(
-            "src.bot.convert_to_ogg",
-            return_value=Path("/tmp/voice_dQw4w9WgXcQ.ogg"),
-        ),
-        "to_thread": patch(
-            "src.bot.asyncio.to_thread",
-            new_callable=AsyncMock,
-        ),
-        "path_exists": patch("src.bot.Path.exists", return_value=False),
-        "path_unlink": patch("src.bot.Path.unlink"),
-        "open": patch("builtins.open", MagicMock()),
-    }
-
-
 class TestStartCommand:
     @pytest.mark.asyncio
     async def test_sends_welcome_message(self, mock_update, mock_context):
@@ -66,132 +31,135 @@ class TestStartCommand:
         assert "YouTube" in welcome_text or "youtube" in welcome_text.lower()
 
 
-class TestHandleMessage:
+class TestHandleMessageWithCaptions:
+    """Tests for the primary path: YouTube captions available."""
+
     @pytest.mark.asyncio
     async def test_sends_processing_status(self, mock_update, mock_context, mock_config):
-        patches = _patch_pipeline(mock_config)
-        with patches["config"], patches["download"], patches["transcribe"], \
-             patches["summarize"], patches["generate_voice"], patches["convert_ogg"], \
-             patches["path_exists"], patches["path_unlink"], patches["open"] as mock_open_ctx:
-            mock_to_thread = AsyncMock(side_effect=[
-                Path("/tmp/audio_dQw4w9WgXcQ.mp3"),
-                TranscriptionResult(text="Transcript text", language_code="en"),
-            ])
-            with patch("src.bot.asyncio.to_thread", mock_to_thread):
-                await handle_message(mock_update, mock_context)
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   return_value=TranscriptFetchResult(text="Transcript", language_code="en")), \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
+             patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            await handle_message(mock_update, mock_context)
 
         first_call = mock_update.message.reply_text.call_args_list[0]
-        assert "Processing" in first_call[0][0] or "processing" in first_call[0][0].lower()
+        assert "processing" in first_call[0][0].lower()
 
     @pytest.mark.asyncio
-    async def test_calls_download(self, mock_update, mock_context, mock_config):
-        patches = _patch_pipeline(mock_config)
-        with patches["config"], patches["download"] as mock_dl, patches["transcribe"], \
-             patches["summarize"], patches["generate_voice"], patches["convert_ogg"], \
-             patches["path_exists"], patches["path_unlink"], patches["open"]:
-            mock_to_thread = AsyncMock(side_effect=[
-                Path("/tmp/audio_dQw4w9WgXcQ.mp3"),
-                TranscriptionResult(text="Transcript text", language_code="en"),
-            ])
-            with patch("src.bot.asyncio.to_thread", mock_to_thread):
-                await handle_message(mock_update, mock_context)
+    async def test_uses_youtube_captions_when_available(self, mock_update, mock_context, mock_config):
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   return_value=TranscriptFetchResult(text="Caption text", language_code="en")) as mock_thread, \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary") as mock_sum, \
+             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
+             patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            await handle_message(mock_update, mock_context)
 
-        # First to_thread call should be download_audio
-        first_call = mock_to_thread.call_args_list[0]
-        assert first_call[0][0] == mock_dl
-
-    @pytest.mark.asyncio
-    async def test_calls_transcribe(self, mock_update, mock_context, mock_config):
-        patches = _patch_pipeline(mock_config)
-        with patches["config"], patches["download"], patches["transcribe"] as mock_tr, \
-             patches["summarize"], patches["generate_voice"], patches["convert_ogg"], \
-             patches["path_exists"], patches["path_unlink"], patches["open"]:
-            mock_to_thread = AsyncMock(side_effect=[
-                Path("/tmp/audio_dQw4w9WgXcQ.mp3"),
-                TranscriptionResult(text="Transcript text", language_code="en"),
-            ])
-            with patch("src.bot.asyncio.to_thread", mock_to_thread):
-                await handle_message(mock_update, mock_context)
-
-        # Second to_thread call should be transcribe_audio
-        second_call = mock_to_thread.call_args_list[1]
-        assert second_call[0][0] == mock_tr
-
-    @pytest.mark.asyncio
-    async def test_calls_summarize(self, mock_update, mock_context, mock_config):
-        patches = _patch_pipeline(mock_config)
-        with patches["config"], patches["download"], patches["transcribe"], \
-             patches["summarize"] as mock_sum, patches["generate_voice"], \
-             patches["convert_ogg"], patches["path_exists"], patches["path_unlink"], \
-             patches["open"]:
-            mock_to_thread = AsyncMock(side_effect=[
-                Path("/tmp/audio_dQw4w9WgXcQ.mp3"),
-                TranscriptionResult(text="Transcript text", language_code="en"),
-            ])
-            with patch("src.bot.asyncio.to_thread", mock_to_thread):
-                await handle_message(mock_update, mock_context)
-
+        # Only one to_thread call (fetch_transcript), not download+transcribe
+        assert mock_thread.call_count == 1
         mock_sum.assert_awaited_once()
-        call_args = mock_sum.call_args
-        assert call_args[0][0] == "Transcript text"
-
-    @pytest.mark.asyncio
-    async def test_calls_tts_with_detected_language(self, mock_update, mock_context, mock_config):
-        patches = _patch_pipeline(mock_config)
-        with patches["config"], patches["download"], patches["transcribe"], \
-             patches["summarize"], patches["generate_voice"] as mock_voice, \
-             patches["convert_ogg"], patches["path_exists"], patches["path_unlink"], \
-             patches["open"]:
-            mock_to_thread = AsyncMock(side_effect=[
-                Path("/tmp/audio_dQw4w9WgXcQ.mp3"),
-                TranscriptionResult(text="Transcript text", language_code="fr"),
-            ])
-            with patch("src.bot.asyncio.to_thread", mock_to_thread), \
-                 patch("src.bot.get_voice_for_language", return_value="fr-FR-HenriNeural") as mock_gv:
-                await handle_message(mock_update, mock_context)
-
-        mock_gv.assert_called_once_with("fr")
-        mock_voice.assert_awaited_once()
+        assert "Caption text" in str(mock_sum.call_args)
 
     @pytest.mark.asyncio
     async def test_sends_summary_text(self, mock_update, mock_context, mock_config):
-        patches = _patch_pipeline(mock_config)
-        with patches["config"], patches["download"], patches["transcribe"], \
-             patches["summarize"], patches["generate_voice"], patches["convert_ogg"], \
-             patches["path_exists"], patches["path_unlink"], patches["open"]:
-            mock_to_thread = AsyncMock(side_effect=[
-                Path("/tmp/audio_dQw4w9WgXcQ.mp3"),
-                TranscriptionResult(text="Transcript text", language_code="en"),
-            ])
-            with patch("src.bot.asyncio.to_thread", mock_to_thread):
-                await handle_message(mock_update, mock_context)
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   return_value=TranscriptFetchResult(text="Text", language_code="en")), \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary text"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
+             patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            await handle_message(mock_update, mock_context)
 
-        # Second reply_text should be the summary
         calls = mock_update.message.reply_text.call_args_list
-        summary_sent = any("Summary text" in str(c) for c in calls)
-        assert summary_sent
+        assert any("Summary text" in str(c) for c in calls)
 
     @pytest.mark.asyncio
     async def test_sends_voice_message(self, mock_update, mock_context, mock_config):
-        patches = _patch_pipeline(mock_config)
-        with patches["config"], patches["download"], patches["transcribe"], \
-             patches["summarize"], patches["generate_voice"], patches["convert_ogg"], \
-             patches["path_exists"], patches["path_unlink"], patches["open"]:
-            mock_to_thread = AsyncMock(side_effect=[
-                Path("/tmp/audio_dQw4w9WgXcQ.mp3"),
-                TranscriptionResult(text="Transcript text", language_code="en"),
-            ])
-            with patch("src.bot.asyncio.to_thread", mock_to_thread):
-                await handle_message(mock_update, mock_context)
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   return_value=TranscriptFetchResult(text="Text", language_code="en")), \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
+             patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            await handle_message(mock_update, mock_context)
 
         mock_update.message.reply_voice.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_tts_with_detected_language(self, mock_update, mock_context, mock_config):
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   return_value=TranscriptFetchResult(text="Bonjour", language_code="fr")), \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary"), \
+             patch("src.bot.get_voice_for_language", return_value="fr-FR-HenriNeural") as mock_gv, \
+             patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
+             patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            await handle_message(mock_update, mock_context)
+
+        mock_gv.assert_called_once_with("fr")
+
+
+class TestHandleMessageFallbackToElevenLabs:
+    """Tests for the fallback path: no captions, use audio download + ElevenLabs."""
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_audio_download(self, mock_update, mock_context, mock_config):
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   side_effect=[
+                       None,  # fetch_transcript returns None
+                       Path("/tmp/audio.mp4"),  # download_audio
+                       TranscriptionResult(text="EL transcript", language_code="en"),
+                   ]) as mock_thread, \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary") as mock_sum, \
+             patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
+             patch("src.bot.generate_voice", new_callable=AsyncMock, return_value=Path("/tmp/v.mp3")), \
+             patch("src.bot.convert_to_ogg", return_value=Path("/tmp/v.ogg")), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            await handle_message(mock_update, mock_context)
+
+        # Three to_thread calls: fetch_transcript + download_audio + transcribe_audio
+        assert mock_thread.call_count == 3
+        mock_sum.assert_awaited_once()
+        assert "EL transcript" in str(mock_sum.call_args)
+
+
+class TestHandleMessageErrors:
     @pytest.mark.asyncio
     async def test_download_error_sends_message(self, mock_update, mock_context, mock_config):
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
-                   side_effect=Exception("Download failed")), \
+                   side_effect=[None, RuntimeError("Download failed")]), \
              patch("src.bot.Path.exists", return_value=False), \
              patch("src.bot.Path.unlink"):
             await handle_message(mock_update, mock_context)
@@ -204,23 +172,20 @@ class TestHandleMessage:
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
-                   side_effect=[Path("/tmp/audio.mp3"), TranscriptionError("Failed")]), \
+                   side_effect=[None, Path("/tmp/audio.mp4"), TranscriptionError("Failed")]), \
              patch("src.bot.Path.exists", return_value=False), \
              patch("src.bot.Path.unlink"):
             await handle_message(mock_update, mock_context)
 
         error_call = mock_update.message.reply_text.call_args_list[-1]
-        assert "Sorry" in error_call[0][0] or "error" in error_call[0][0].lower()
+        assert "Sorry" in error_call[0][0]
 
     @pytest.mark.asyncio
     async def test_summarization_error_sends_message(self, mock_update, mock_context, mock_config):
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
-                   side_effect=[
-                       Path("/tmp/audio.mp3"),
-                       TranscriptionResult(text="Text", language_code="en"),
-                   ]), \
+                   return_value=TranscriptFetchResult(text="Text", language_code="en")), \
              patch("src.bot.summarize_text", new_callable=AsyncMock,
                    side_effect=SummarizationError("Failed")), \
              patch("src.bot.Path.exists", return_value=False), \
@@ -228,31 +193,23 @@ class TestHandleMessage:
             await handle_message(mock_update, mock_context)
 
         error_call = mock_update.message.reply_text.call_args_list[-1]
-        assert "Sorry" in error_call[0][0] or "error" in error_call[0][0].lower()
+        assert "Sorry" in error_call[0][0]
 
     @pytest.mark.asyncio
     async def test_tts_failure_still_sends_text(self, mock_update, mock_context, mock_config):
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
-                   side_effect=[
-                       Path("/tmp/audio.mp3"),
-                       TranscriptionResult(text="Text", language_code="en"),
-                   ]), \
-             patch("src.bot.summarize_text", new_callable=AsyncMock,
-                   return_value="Summary text"), \
+                   return_value=TranscriptFetchResult(text="Text", language_code="en")), \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary text"), \
              patch("src.bot.get_voice_for_language", return_value="en-US-GuyNeural"), \
-             patch("src.bot.generate_voice", new_callable=AsyncMock,
-                   side_effect=TTSError("TTS failed")), \
+             patch("src.bot.generate_voice", new_callable=AsyncMock, side_effect=TTSError("Failed")), \
              patch("src.bot.Path.exists", return_value=False), \
              patch("src.bot.Path.unlink"):
             await handle_message(mock_update, mock_context)
 
-        # Summary text should still be sent
         calls = mock_update.message.reply_text.call_args_list
-        summary_sent = any("Summary text" in str(c) for c in calls)
-        assert summary_sent
-        # Voice should NOT be sent
+        assert any("Summary text" in str(c) for c in calls)
         mock_update.message.reply_voice.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -260,13 +217,9 @@ class TestHandleMessage:
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
-                   side_effect=[
-                       Path("/tmp/audio_dQw4w9WgXcQ.mp3"),
-                       TranscriptionError("Failed"),
-                   ]), \
+                   side_effect=[None, Path("/tmp/audio.mp4"), TranscriptionError("Failed")]), \
              patch("src.bot.Path.exists", return_value=True), \
              patch("src.bot.Path.unlink") as mock_unlink:
             await handle_message(mock_update, mock_context)
 
-        # Should attempt cleanup
         assert mock_unlink.called

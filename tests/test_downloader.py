@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from src.downloader import extract_video_id, download_audio
+from src.downloader import extract_video_id, download_audio, fetch_transcript, TranscriptFetchResult
 
 
 class TestExtractVideoId:
@@ -27,34 +27,71 @@ class TestExtractVideoId:
             extract_video_id("")
 
 
+class TestFetchTranscript:
+    @patch("src.downloader.YouTubeTranscriptApi")
+    def test_returns_transcript_when_available(self, mock_api_class):
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_transcript = MagicMock()
+        mock_snippet = MagicMock()
+        mock_snippet.text = "Hello world"
+        mock_transcript.snippets = [mock_snippet]
+        mock_transcript.language_code = "en"
+        mock_api.fetch.return_value = mock_transcript
+
+        result = fetch_transcript("dQw4w9WgXcQ")
+
+        assert isinstance(result, TranscriptFetchResult)
+        assert result.text == "Hello world"
+        assert result.language_code == "en"
+
+    @patch("src.downloader.YouTubeTranscriptApi")
+    def test_returns_none_on_error(self, mock_api_class):
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.fetch.side_effect = Exception("No captions")
+
+        result = fetch_transcript("dQw4w9WgXcQ")
+
+        assert result is None
+
+    @patch("src.downloader.YouTubeTranscriptApi")
+    def test_returns_none_on_empty_text(self, mock_api_class):
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_transcript = MagicMock()
+        mock_transcript.snippets = []
+        mock_transcript.language_code = "en"
+        mock_api.fetch.return_value = mock_transcript
+
+        result = fetch_transcript("dQw4w9WgXcQ")
+
+        assert result is None
+
+
 class TestDownloadAudio:
-    @patch("src.downloader.yt_dlp.YoutubeDL")
-    def test_calls_ytdlp_with_correct_options(self, mock_ydl_class):
-        mock_ydl = MagicMock()
-        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
-        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
-        mock_ydl.extract_info.return_value = {"id": "dQw4w9WgXcQ"}
-
-        download_audio("https://www.youtube.com/watch?v=dQw4w9WgXcQ", output_dir="/tmp")
-
-        mock_ydl.extract_info.assert_called_once_with(
-            "https://www.youtube.com/watch?v=dQw4w9WgXcQ", download=True
-        )
-        call_opts = mock_ydl_class.call_args[0][0]
-        assert call_opts["format"] == "bestaudio/best"
-        assert any(p["key"] == "FFmpegExtractAudio" for p in call_opts["postprocessors"])
-
-    @patch("src.downloader.yt_dlp.YoutubeDL")
-    def test_returns_file_path(self, mock_ydl_class):
-        mock_ydl = MagicMock()
-        mock_ydl_class.return_value.__enter__ = MagicMock(return_value=mock_ydl)
-        mock_ydl_class.return_value.__exit__ = MagicMock(return_value=False)
-        mock_ydl.extract_info.return_value = {"id": "dQw4w9WgXcQ"}
+    @patch("src.downloader.YouTube")
+    def test_downloads_audio_stream(self, mock_yt_class):
+        mock_yt = MagicMock()
+        mock_yt_class.return_value = mock_yt
+        mock_stream = MagicMock()
+        mock_yt.streams.filter.return_value.first.return_value = mock_stream
 
         result = download_audio(
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ", output_dir="/tmp"
         )
 
+        mock_stream.download.assert_called_once_with(
+            output_path="/tmp", filename="audio_dQw4w9WgXcQ.mp4"
+        )
         assert isinstance(result, Path)
         assert "dQw4w9WgXcQ" in str(result)
-        assert str(result).endswith(".mp3")
+
+    @patch("src.downloader.YouTube")
+    def test_raises_when_no_audio_stream(self, mock_yt_class):
+        mock_yt = MagicMock()
+        mock_yt_class.return_value = mock_yt
+        mock_yt.streams.filter.return_value.first.return_value = None
+
+        with pytest.raises(RuntimeError, match="No audio stream found"):
+            download_audio("https://www.youtube.com/watch?v=dQw4w9WgXcQ")

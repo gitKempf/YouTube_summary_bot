@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 
 from src.config import get_config
-from src.downloader import download_audio, extract_video_id
+from src.downloader import download_audio, extract_video_id, fetch_transcript
 from src.transcriber import transcribe_audio, TranscriptionError
 from src.summarizer import summarize_text, SummarizationError
 from src.tts import generate_voice, convert_to_ogg, get_voice_for_language, TTSError
@@ -40,28 +40,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Processing your video... This may take a few minutes."
         )
 
-        # Download audio
-        audio_path = await asyncio.to_thread(download_audio, url)
+        # Step 1: Try YouTube captions first (fast), fall back to audio download + ElevenLabs
+        transcript_result = await asyncio.to_thread(fetch_transcript, video_id)
 
-        # Transcribe
-        transcription = await asyncio.to_thread(
-            transcribe_audio, audio_path, config.elevenlabs_api_key
-        )
+        if transcript_result:
+            transcript_text = transcript_result.text
+            language_code = transcript_result.language_code
+            logger.info(f"Got transcript from YouTube captions ({language_code})")
+        else:
+            logger.info("No captions available, downloading audio for transcription")
+            audio_path = await asyncio.to_thread(download_audio, url)
+            transcription = await asyncio.to_thread(
+                transcribe_audio, audio_path, config.elevenlabs_api_key
+            )
+            transcript_text = transcription.text
+            language_code = transcription.language_code
 
-        # Summarize
+        # Step 2: Summarize
         summary = await summarize_text(
-            transcription.text,
+            transcript_text,
             config.anthropic_api_key,
             model=config.claude_model,
             max_tokens=config.max_tokens,
         )
 
-        # Send text summary
+        # Step 3: Send text summary
         await update.message.reply_text(summary)
 
-        # Generate and send voice (graceful degradation)
+        # Step 4: Generate and send voice (graceful degradation)
         try:
-            voice = get_voice_for_language(transcription.language_code)
+            voice = get_voice_for_language(language_code)
             voice_mp3 = Path(f"/tmp/voice_{video_id}.mp3")
             await generate_voice(summary, voice_mp3, voice=voice)
             voice_path = convert_to_ogg(voice_mp3)
