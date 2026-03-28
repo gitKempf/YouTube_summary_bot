@@ -6,6 +6,8 @@ anthropic
 edge-tts
 python-dotenv
 mem0ai
+langchain-neo4j
+rank-bm25
 pytest
 pytest-mock
 pytest-asyncio
