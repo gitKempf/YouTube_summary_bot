@@ -74,13 +74,37 @@ class MemoryManager:
             "version": "v1.1",
         }
 
-        # Neo4j graph store: Mem0's graph module uses OpenAI function-calling
-        # format which is incompatible with Anthropic. Graph entity extraction
-        # is handled by our fact_checker.py instead. Neo4j integration requires
-        # switching Mem0's graph LLM to OpenAI or waiting for Mem0 to fix
-        # Anthropic tool format support.
-        # TODO: Enable when Mem0 supports Anthropic tools for graph extraction
-        logger.info("Using vector-only memory (graph via fact_checker.py)")
+        # Neo4j graph store: uses OpenAI for entity extraction (Mem0's graph
+        # module requires OpenAI function-calling format)
+        if config.openai_api_key:
+            try:
+                import socket
+                s = socket.socket()
+                s.settimeout(2)
+                host = config.neo4j_url.split("://")[1].split(":")[0]
+                port = int(config.neo4j_url.split(":")[-1])
+                s.connect((host, port))
+                s.close()
+                mem0_config["graph_store"] = {
+                    "provider": "neo4j",
+                    "config": {
+                        "url": config.neo4j_url,
+                        "username": config.neo4j_username,
+                        "password": config.neo4j_password,
+                    },
+                    "llm": {
+                        "provider": "openai",
+                        "config": {
+                            "model": "gpt-4o-mini",
+                            "api_key": config.openai_api_key,
+                        },
+                    },
+                }
+                logger.info("Neo4j graph store connected (OpenAI for entity extraction)")
+            except Exception:
+                logger.info("Neo4j not available, using vector-only memory")
+        else:
+            logger.info("No OpenAI key, using vector-only memory (graph disabled)")
 
         self._memory = Memory.from_config(config_dict=mem0_config)
 

@@ -17,6 +17,7 @@ class Config:
     max_tokens: int = 4096
     # Memory system
     memory_enabled: bool = False
+    openai_api_key: str = ""
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
     neo4j_url: str = "bolt://localhost:7687"
@@ -59,6 +60,7 @@ def get_config() -> Config:
         allowed_user_ids=allowed,
         required_channel=os.getenv("REQUIRED_CHANNEL", ""),
         memory_enabled=mem0_enabled,
+        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         qdrant_host=os.getenv("MEM0_QDRANT_HOST", "localhost"),
         qdrant_port=int(os.getenv("MEM0_QDRANT_PORT", "6333")),
         neo4j_url=os.getenv("MEM0_NEO4J_URL", "bolt://localhost:7687"),
