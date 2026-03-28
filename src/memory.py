@@ -34,11 +34,10 @@ class MemoryManager:
                 },
             },
             "embedder": {
-                "provider": "voyageai",
+                "provider": "huggingface",
                 "config": {
-                    "model": "voyage-3-lite",
-                    "embedding_model_dims": 512,
-                    "api_key": config.voyage_api_key,
+                    "model": "sentence-transformers/all-MiniLM-L6-v2",
+                    "embedding_model_dims": 384,
                 },
             },
             "vector_store": {
@@ -49,7 +48,7 @@ class MemoryManager:
                     "dbname": config.pg_dbname,
                     "user": "postgres",
                     "password": "postgres",
-                    "embedding_model_dims": 512,
+                    "embedding_model_dims": 384,
                 },
             },
             "graph_store": {

@@ -10,7 +10,7 @@ def mem_config():
     config.memory_enabled = True
     config.anthropic_api_key = "fake-ant-key"
     config.claude_model = "claude-sonnet-4-6"
-    config.voyage_api_key = "fake-voyage-key"
+    config.memory_enabled = True
     config.pg_host = "localhost"
     config.pg_port = 5432
     config.pg_dbname = "mem0"
@@ -29,7 +29,7 @@ class TestMemoryManager:
         cfg = call_kwargs["config_dict"]
         assert cfg["vector_store"]["provider"] == "pgvector"
         assert cfg["graph_store"]["provider"] == "neo4j"
-        assert cfg["embedder"]["provider"] == "voyageai"
+        assert cfg["embedder"]["provider"] == "huggingface"
 
     @pytest.mark.asyncio
     @patch("src.memory.Memory.from_config")

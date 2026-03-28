@@ -15,9 +15,8 @@ class Config:
     tts_voice: str = "en-US-RogerNeural"
     claude_model: str = "claude-sonnet-4-6"
     max_tokens: int = 4096
-    # Memory system (opt-in)
+    # Memory system (opt-in via MEM0_ENABLED=true)
     memory_enabled: bool = False
-    voyage_api_key: str = ""
     pg_host: str = "localhost"
     pg_port: int = 5432
     pg_dbname: str = "mem0"
@@ -54,7 +53,7 @@ def get_config() -> Config:
 
     required_channel = os.getenv("REQUIRED_CHANNEL", "")
 
-    voyage_key = os.getenv("VOYAGE_API_KEY", "")
+    mem0_enabled = os.getenv("MEM0_ENABLED", "").lower() in ("true", "1", "yes")
 
     return Config(
         telegram_bot_token=token,
@@ -62,8 +61,7 @@ def get_config() -> Config:
         anthropic_api_key=ant_key,
         allowed_user_ids=allowed,
         required_channel=required_channel,
-        memory_enabled=bool(voyage_key),
-        voyage_api_key=voyage_key,
+        memory_enabled=mem0_enabled,
         pg_host=os.getenv("MEM0_PG_HOST", "localhost"),
         pg_port=int(os.getenv("MEM0_PG_PORT", "5432")),
         pg_dbname=os.getenv("MEM0_PG_DBNAME", "mem0"),

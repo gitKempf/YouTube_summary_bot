@@ -6,7 +6,6 @@ anthropic
 edge-tts
 python-dotenv
 mem0ai
-voyageai
 pytest
 pytest-mock
 pytest-asyncio
