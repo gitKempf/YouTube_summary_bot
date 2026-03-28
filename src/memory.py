@@ -1,11 +1,16 @@
 import asyncio
+import hashlib
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from mem0 import Memory
+from qdrant_client import QdrantClient, models
 
 from src.config import Config
+
+TRANSCRIPT_COLLECTION = "youtube_bot_transcripts"
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +117,73 @@ class MemoryManager:
             logger.info("No OpenAI key, using vector-only memory (graph disabled)")
 
         self._memory = Memory.from_config(config_dict=mem0_config)
+
+        # Separate Qdrant client for transcript storage
+        self._qdrant = QdrantClient(host=config.qdrant_host, port=config.qdrant_port)
+        self._ensure_transcript_collection()
+
+    def _ensure_transcript_collection(self):
+        try:
+            collections = [c.name for c in self._qdrant.get_collections().collections]
+            if TRANSCRIPT_COLLECTION not in collections:
+                self._qdrant.create_collection(
+                    collection_name=TRANSCRIPT_COLLECTION,
+                    vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
+                )
+                logger.info(f"Created collection {TRANSCRIPT_COLLECTION}")
+        except Exception as e:
+            logger.warning(f"Could not create transcript collection: {e}")
+
+    async def store_transcript(
+        self, video_id: str, user_id: str, transcript: str, language_code: str = "en"
+    ) -> None:
+        try:
+            existing = await self.get_transcript(video_id=video_id, user_id=user_id)
+            if existing:
+                logger.info(f"[TRANSCRIPT] Already stored for video {video_id}")
+                return
+
+            point_id = hashlib.md5(f"{user_id}:{video_id}".encode()).hexdigest()
+            await asyncio.to_thread(
+                self._qdrant.upsert,
+                collection_name=TRANSCRIPT_COLLECTION,
+                points=[
+                    models.PointStruct(
+                        id=point_id,
+                        vector=[0.0],  # No vector search needed, just storage
+                        payload={
+                            "video_id": video_id,
+                            "user_id": user_id,
+                            "transcript": transcript,
+                            "language_code": language_code,
+                            "stored_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                ],
+            )
+            logger.info(f"[TRANSCRIPT] Stored transcript for video {video_id} ({len(transcript)} chars)")
+        except Exception as e:
+            logger.warning(f"Failed to store transcript: {e}")
+
+    async def get_transcript(self, video_id: str, user_id: str) -> Optional[Dict]:
+        try:
+            results, _ = await asyncio.to_thread(
+                self._qdrant.scroll,
+                collection_name=TRANSCRIPT_COLLECTION,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(key="video_id", match=models.MatchValue(value=video_id)),
+                        models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id)),
+                    ]
+                ),
+                limit=1,
+            )
+            if results:
+                return results[0].payload
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get transcript: {e}")
+            return None
 
     async def search(
         self, query: str, user_id: str, limit: int = 10

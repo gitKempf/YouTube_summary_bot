@@ -37,6 +37,7 @@ def pipeline_mgr():
     m.search = AsyncMock(return_value=[])
     m.add = AsyncMock()
     m.add_if_new = AsyncMock(return_value=True)
+    m.store_transcript = AsyncMock()
     return m
 
 
@@ -123,6 +124,7 @@ class TestE2EPipelineVideoTwo:
                         metadata={"entity": "AI agents", "confidence": 0.9}),
         ])
         mgr.add_if_new = AsyncMock(return_value=True)
+        mgr.store_transcript = AsyncMock()
 
         update = MagicMock()
         update.message = MagicMock()

@@ -186,6 +186,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         memory_mgr = context.bot_data.get("memory_mgr")
         user_mem_id = f"tg_{update.effective_user.id}"
 
+        # Store transcript in separate collection
+        if config.memory_enabled and memory_mgr:
+            try:
+                await memory_mgr.store_transcript(
+                    video_id=video_id, user_id=user_mem_id,
+                    transcript=transcript_text, language_code=language_code,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to store transcript: {e}")
+
         if config.memory_enabled and memory_mgr:
             try:
                 await progress.update(12, "Analyzing topics...")

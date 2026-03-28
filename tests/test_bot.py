@@ -300,6 +300,7 @@ class TestMemoryIntegration:
         m.search = AsyncMock(return_value=[])
         m.add = AsyncMock()
         m.add_if_new = AsyncMock(return_value=True)
+        m.store_transcript = AsyncMock()
         return m
 
     @pytest.mark.asyncio
