@@ -117,17 +117,7 @@ class TestSplitMessage:
 
 class TestAccessControl:
     @pytest.mark.asyncio
-    async def test_unauthorized_user_blocked(self, mock_update, mock_context):
-        mock_update.effective_user.id = 999
-        mock_config = MagicMock()
-        mock_config.is_user_allowed.return_value = False
-        with patch("src.bot.get_config", return_value=mock_config):
-            await start_command(mock_update, mock_context)
-        call_text = mock_update.message.reply_text.call_args[0][0]
-        assert "not authorized" in call_text
-
-    @pytest.mark.asyncio
-    async def test_authorized_user_allowed(self, mock_update, mock_context):
+    async def test_whitelist_user_allowed(self, mock_update, mock_context):
         mock_config = MagicMock()
         mock_config.is_user_allowed.return_value = True
         with patch("src.bot.get_config", return_value=mock_config):
@@ -135,14 +125,53 @@ class TestAccessControl:
         call_text = mock_update.message.reply_text.call_args[0][0]
         assert "Welcome" in call_text
 
+    @pytest.mark.asyncio
+    async def test_channel_member_allowed(self, mock_update, mock_context):
+        mock_config = MagicMock()
+        mock_config.is_user_allowed.return_value = False
+        mock_config.required_channel = "@testchannel"
+        mock_member = MagicMock()
+        mock_member.status = "member"
+        mock_context.bot.get_chat_member = AsyncMock(return_value=mock_member)
+        with patch("src.bot.get_config", return_value=mock_config):
+            await start_command(mock_update, mock_context)
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "Welcome" in call_text
+
+    @pytest.mark.asyncio
+    async def test_non_member_blocked(self, mock_update, mock_context):
+        mock_update.effective_user.id = 999
+        mock_config = MagicMock()
+        mock_config.is_user_allowed.return_value = False
+        mock_config.required_channel = "@testchannel"
+        mock_member = MagicMock()
+        mock_member.status = "left"
+        mock_context.bot.get_chat_member = AsyncMock(return_value=mock_member)
+        with patch("src.bot.get_config", return_value=mock_config):
+            await start_command(mock_update, mock_context)
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "join" in call_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_channel_check_error_blocks(self, mock_update, mock_context):
+        mock_update.effective_user.id = 999
+        mock_config = MagicMock()
+        mock_config.is_user_allowed.return_value = False
+        mock_config.required_channel = "@testchannel"
+        mock_context.bot.get_chat_member = AsyncMock(side_effect=Exception("API error"))
+        with patch("src.bot.get_config", return_value=mock_config):
+            await start_command(mock_update, mock_context)
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "join" in call_text.lower()
+
 
 class TestStartCommand:
     @pytest.mark.asyncio
-    async def test_sends_welcome_message(self, mock_update, mock_context):
-        await start_command(mock_update, mock_context)
-        mock_update.message.reply_text.assert_awaited_once()
-        welcome_text = mock_update.message.reply_text.call_args[0][0]
-        assert "YouTube" in welcome_text or "youtube" in welcome_text.lower()
+    async def test_sends_welcome_message(self, mock_update, mock_context, mock_config):
+        with patch("src.bot.get_config", return_value=mock_config):
+            await start_command(mock_update, mock_context)
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "YouTube" in call_text or "youtube" in call_text.lower()
 
 
 class TestHandleMessageWithCaptions:

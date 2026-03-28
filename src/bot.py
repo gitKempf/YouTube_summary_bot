@@ -3,7 +3,7 @@ import logging
 from pathlib import Path
 from typing import List
 
-from telegram import Update, Message
+from telegram import ChatMember, Update, Message
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -93,14 +93,35 @@ class ProgressTracker:
                 pass  # Telegram rate limit or message unchanged
 
 
-async def _check_access(update: Update) -> bool:
+async def _check_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     config = get_config()
     user_id = update.effective_user.id
-    if not config.is_user_allowed(user_id):
-        logger.warning(f"Unauthorized access attempt by user {user_id}")
+    logger.info(f"Request from user {user_id} ({update.effective_user.first_name})")
+
+    # Whitelist check — pass if in list or list is empty
+    if config.is_user_allowed(user_id):
+        return True
+
+    # Channel membership check
+    if config.required_channel:
+        try:
+            member = await context.bot.get_chat_member(
+                chat_id=config.required_channel, user_id=user_id,
+            )
+            if member.status not in (ChatMember.LEFT, ChatMember.BANNED):
+                return True
+        except Exception:
+            pass
+
+    # Neither condition met
+    if config.required_channel:
+        await update.message.reply_text(
+            f"Please join {config.required_channel} to use this bot."
+        )
+    else:
         await update.message.reply_text("Sorry, you are not authorized to use this bot.")
-        return False
-    return True
+    logger.warning(f"Unauthorized access attempt by user {user_id}")
+    return False
 
 
 async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -110,7 +131,7 @@ async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _check_access(update):
+    if not await _check_access(update, context):
         return
     await update.message.reply_text(
         "Welcome! Send me a YouTube video link and I'll create a summary for you.\n"
@@ -119,7 +140,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _check_access(update):
+    if not await _check_access(update, context):
         return
     url = update.message.text
     config = get_config()

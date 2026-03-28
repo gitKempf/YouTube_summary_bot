@@ -12,6 +12,7 @@ class Config:
     elevenlabs_api_key: str
     anthropic_api_key: str
     allowed_user_ids: frozenset = field(default_factory=frozenset)
+    required_channel: str = ""
     tts_voice: str = "en-US-RogerNeural"
     claude_model: str = "claude-sonnet-4-6"
     max_tokens: int = 4096
@@ -43,9 +44,12 @@ def get_config() -> Config:
         int(uid.strip()) for uid in raw_ids.split(",") if uid.strip()
     )
 
+    required_channel = os.getenv("REQUIRED_CHANNEL", "")
+
     return Config(
         telegram_bot_token=token,
         elevenlabs_api_key=el_key,
         anthropic_api_key=ant_key,
         allowed_user_ids=allowed,
+        required_channel=required_channel,
     )
