@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — YouTube Summary Bot</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg: var(--tg-theme-bg-color, #fff);
+            --text: var(--tg-theme-text-color, #222);
+            --hint: var(--tg-theme-hint-color, #999);
+            --link: var(--tg-theme-link-color, #2481cc);
+            --btn: var(--tg-theme-button-color, #2481cc);
+            --btn-text: var(--tg-theme-button-text-color, #fff);
+            --secondary: var(--tg-theme-secondary-bg-color, #f0f0f0);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 16px; }
+        h1 { font-size: 20px; margin-bottom: 16px; }
+        h2 { font-size: 16px; margin: 20px 0 8px; color: var(--hint); }
+        .card { background: var(--secondary); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+        .stat { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(0,0,0,0.05); }
+        .stat:last-child { border-bottom: none; }
+        .stat-value { font-weight: 600; color: var(--link); }
+        .nav { display: flex; gap: 8px; margin-bottom: 20px; }
+        .nav a { flex: 1; text-align: center; padding: 10px; background: var(--btn); color: var(--btn-text);
+                 border-radius: 8px; text-decoration: none; font-size: 14px; }
+        .nav a.secondary { background: var(--secondary); color: var(--text); }
+        .btn { display: block; width: 100%; padding: 14px; background: var(--btn); color: var(--btn-text);
+               border: none; border-radius: 10px; font-size: 16px; cursor: pointer; margin-top: 16px; }
+        .video-list { list-style: none; }
+        .video-item { padding: 12px; border-bottom: 1px solid rgba(0,0,0,0.05); }
+        .video-item a { color: var(--link); text-decoration: none; }
+        .video-meta { font-size: 12px; color: var(--hint); margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <h1>YouTube Summary Bot</h1>
+
+    <div class="nav">
+        <a href="#stats" class="secondary" onclick="showSection('stats')">Stats</a>
+        <a href="#videos" class="secondary" onclick="showSection('videos')">Videos</a>
+        <a href="/vault/" target="_blank">Knowledge Graph</a>
+    </div>
+
+    <div id="stats-section">
+        <h2>Memory Stats</h2>
+        <div class="card">
+            <div class="stat"><span>Claims stored</span><span class="stat-value" id="claim-count">—</span></div>
+            <div class="stat"><span>Videos processed</span><span class="stat-value" id="video-count">—</span></div>
+            <div class="stat"><span>User ID</span><span class="stat-value" id="user-id">—</span></div>
+        </div>
+
+        <button class="btn" onclick="exportVault()">Download Obsidian Vault (ZIP)</button>
+    </div>
+
+    <div id="videos-section" style="display:none">
+        <h2>Processed Videos</h2>
+        <div class="card">
+            <ul class="video-list" id="video-list">
+                <li class="video-item">Loading...</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        const user = tg.initDataUnsafe?.user;
+        const userId = user ? `tg_${user.id}` : 'tg_120292793';
+
+        document.getElementById('user-id').textContent = userId;
+
+        // Load stats
+        fetch(`/api/settings?user_id=${userId}`)
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('claim-count').textContent = data.claim_count || 0;
+                document.getElementById('video-count').textContent = data.video_count || 0;
+            });
+
+        // Load videos
+        fetch(`/api/videos?user_id=${userId}`)
+            .then(r => r.json())
+            .then(videos => {
+                const list = document.getElementById('video-list');
+                if (videos.length === 0) {
+                    list.innerHTML = '<li class="video-item">No videos processed yet</li>';
+                    return;
+                }
+                list.innerHTML = videos.map(v => `
+                    <li class="video-item">
+                        <a href="https://youtube.com/watch?v=${v.video_id}" target="_blank">
+                            ${v.video_id}
+                        </a>
+                        <div class="video-meta">${v.language_code} · ${v.stored_at || ''}</div>
+                    </li>
+                `).join('');
+            });
+
+        function showSection(name) {
+            document.getElementById('stats-section').style.display = name === 'stats' ? 'block' : 'none';
+            document.getElementById('videos-section').style.display = name === 'videos' ? 'block' : 'none';
+        }
+
+        function exportVault() {
+            window.open(`/api/export/obsidian?user_id=${userId}`, '_blank');
+        }
+    </script>
+</body>
+</html>

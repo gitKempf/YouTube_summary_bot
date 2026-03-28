@@ -6,6 +6,23 @@ services:
       - MEM0_QDRANT_HOST=qdrant
       - MEM0_QDRANT_PORT=6333
       - MEM0_NEO4J_URL=bolt://neo4j:7687
+      - WEBAPP_URL=https://your-domain.com
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.webapp
+    env_file: .env
+    environment:
+      - MEM0_QDRANT_HOST=qdrant
+      - MEM0_QDRANT_PORT=6333
+      - MEM0_NEO4J_URL=bolt://neo4j:7687
+    ports:
+      - "8000:8000"
     depends_on:
       qdrant:
         condition: service_healthy

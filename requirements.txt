@@ -8,6 +8,9 @@ python-dotenv
 mem0ai
 langchain-neo4j
 rank-bm25
+fastapi
+uvicorn
+jinja2
 pytest
 pytest-mock
 pytest-asyncio

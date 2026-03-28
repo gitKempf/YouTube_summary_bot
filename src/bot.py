@@ -1,9 +1,10 @@
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import List
 
-from telegram import ChatMember, Update, Message
+from telegram import ChatMember, InlineKeyboardButton, InlineKeyboardMarkup, Update, Message, WebAppInfo
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -21,6 +22,8 @@ from src.summarizer import summarize_text, SummarizationError
 from src.tts import generate_voice_chunked, get_voice_for_language, TTSError
 
 logger = logging.getLogger(__name__)
+
+WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://localhost:8000")
 
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 PROGRESS_BAR_WIDTH = 15
@@ -132,12 +135,25 @@ async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Your Telegram user ID: {user_id}")
 
 
+async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send link to the web dashboard."""
+    if not await _check_access(update, context):
+        return
+    await update.message.reply_text(
+        "Open your dashboard to view claims, knowledge graph, and export vault:",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("Open Dashboard", web_app=WebAppInfo(url=WEBAPP_URL)),
+        ]]),
+    )
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _check_access(update, context):
         return
     await update.message.reply_text(
         "Welcome! Send me a YouTube video link and I'll create a summary for you.\n"
-        "You'll receive both a text summary and a voice message."
+        "You'll receive both a text summary and a voice message.\n\n"
+        "Use /dashboard to view your knowledge base."
     )
 
 
@@ -348,6 +364,7 @@ def create_app():
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("id", id_command))
+    app.add_handler(CommandHandler("dashboard", dashboard_command))
     app.add_handler(
         MessageHandler(
             filters.TEXT
