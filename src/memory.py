@@ -10,6 +10,27 @@ from src.config import Config
 logger = logging.getLogger(__name__)
 
 
+def _patch_mem0_anthropic_tool_choice():
+    """Fix Mem0 bug: Anthropic API expects tool_choice as dict, not string."""
+    try:
+        import mem0.llms.anthropic as mod
+        original = mod.AnthropicLLM.generate_response
+
+        def patched(self, messages, response_format=None, tools=None, tool_choice="auto"):
+            if isinstance(tool_choice, str):
+                tool_choice = {"type": tool_choice}
+            return original(self, messages, response_format=response_format,
+                            tools=tools, tool_choice=tool_choice)
+
+        mod.AnthropicLLM.generate_response = patched
+        logger.info("Patched Mem0 Anthropic tool_choice format")
+    except Exception as e:
+        logger.warning(f"Could not patch Mem0 Anthropic: {e}")
+
+
+_patch_mem0_anthropic_tool_choice()
+
+
 class MemoryError(Exception):
     pass
 
@@ -53,26 +74,13 @@ class MemoryManager:
             "version": "v1.1",
         }
 
-        # Connect Neo4j graph store if reachable
-        try:
-            import socket
-            s = socket.socket()
-            s.settimeout(2)
-            host = config.neo4j_url.split("://")[1].split(":")[0]
-            port = int(config.neo4j_url.split(":")[-1])
-            s.connect((host, port))
-            s.close()
-            mem0_config["graph_store"] = {
-                "provider": "neo4j",
-                "config": {
-                    "url": config.neo4j_url,
-                    "username": config.neo4j_username,
-                    "password": config.neo4j_password,
-                },
-            }
-            logger.info("Neo4j graph store connected")
-        except Exception:
-            logger.info("Neo4j not available, using vector-only memory")
+        # Neo4j graph store: Mem0's graph module uses OpenAI function-calling
+        # format which is incompatible with Anthropic. Graph entity extraction
+        # is handled by our fact_checker.py instead. Neo4j integration requires
+        # switching Mem0's graph LLM to OpenAI or waiting for Mem0 to fix
+        # Anthropic tool format support.
+        # TODO: Enable when Mem0 supports Anthropic tools for graph extraction
+        logger.info("Using vector-only memory (graph via fact_checker.py)")
 
         self._memory = Memory.from_config(config_dict=mem0_config)
 
