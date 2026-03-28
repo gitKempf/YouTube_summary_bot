@@ -39,6 +39,6 @@ def test_config_has_defaults(monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-el-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-ant-key")
     config = get_config()
-    assert config.tts_voice == "en-US-AndrewMultilingualNeural"
+    assert config.tts_voice == "en-US-RogerNeural"
     assert config.claude_model == "claude-sonnet-4-6"
     assert config.max_tokens == 4096

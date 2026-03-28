@@ -15,7 +15,7 @@ def mock_config():
     config.telegram_bot_token = "fake-token"
     config.elevenlabs_api_key = "fake-el-key"
     config.anthropic_api_key = "fake-ant-key"
-    config.tts_voice = "en-US-AndrewMultilingualNeural"
+    config.tts_voice = "en-US-RogerNeural"
     config.claude_model = "claude-sonnet-4-6"
     config.max_tokens = 4096
     return config
@@ -39,7 +39,7 @@ def _happy_patches(mock_config, transcript=None, summary="Summary"):
         "sum": patch("src.bot.summarize_text", new_callable=AsyncMock,
                      return_value=summary),
         "voice": patch("src.bot.get_voice_for_language",
-                       return_value="en-US-AndrewMultilingualNeural"),
+                       return_value="en-US-RogerNeural"),
         "tts": patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
                      return_value=[Path("/tmp/v.ogg")]),
         "open": patch("builtins.open", MagicMock()),
@@ -178,7 +178,7 @@ class TestHandleMessageFallback:
                    side_effect=[None, Path("/tmp/a.mp4"),
                                 TranscriptionResult(text="EL text", language_code="en")]) as mt, \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="S") as ms, \
-             patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-RogerNeural"), \
              patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
                    return_value=[Path("/tmp/v.ogg")]), \
              patch("builtins.open", MagicMock()), \
@@ -210,7 +210,7 @@ class TestHandleMessageErrors:
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    return_value=TranscriptFetchResult(text="T", language_code="en")), \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary"), \
-             patch("src.bot.get_voice_for_language", return_value="en-US-AndrewMultilingualNeural"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-RogerNeural"), \
              patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
                    side_effect=TTSError("Fail")), \
              patch("src.bot.Path.exists", return_value=False), \

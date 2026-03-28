@@ -11,10 +11,11 @@ class TTSError(Exception):
     pass
 
 
-# Upgraded to Multilingual/Copilot-grade voices where available (more natural)
+# Standard Neural voices — reliable, fast, no timeouts
+# (Multilingual voices hang on longer text)
 VOICE_MAP = {
-    "en": "en-US-AndrewMultilingualNeural",
-    "eng": "en-US-AndrewMultilingualNeural",
+    "en": "en-US-RogerNeural",
+    "eng": "en-US-RogerNeural",
     "ru": "ru-RU-DmitryNeural",
     "rus": "ru-RU-DmitryNeural",
     "es": "es-ES-AlvaroNeural",
@@ -45,16 +46,17 @@ VOICE_MAP = {
     "tur": "tr-TR-AhmetNeural",
 }
 
-TTS_TIMEOUT_SECONDS = 180
+TTS_TIMEOUT_SECONDS = 60
 TTS_RATE = "+10%"
 TTS_OGG_BITRATE = "128k"
 TTS_CHUNK_MAX_CHARS = 3000
+TTS_MAX_RETRIES = 2
 
 ProgressCallback = Optional[Callable[[int, int], Awaitable[None]]]
 
 
 def get_voice_for_language(language_code: str) -> str:
-    return VOICE_MAP.get(language_code, "en-US-AndrewMultilingualNeural")
+    return VOICE_MAP.get(language_code, "en-US-RogerNeural")
 
 
 def strip_markdown(text: str) -> str:
@@ -110,32 +112,38 @@ def split_text_chunks(text: str, max_chars: int = TTS_CHUNK_MAX_CHARS) -> List[s
 async def generate_voice(
     text: str,
     output_path: Path,
-    voice: str = "en-US-AndrewMultilingualNeural",
+    voice: str = "en-US-RogerNeural",
 ) -> Path:
     if not text or not text.strip():
         raise ValueError("Cannot generate voice from empty text")
 
     clean_text = strip_markdown(text)
+    last_error = None
 
-    try:
-        communicate = edge_tts.Communicate(clean_text, voice, rate=TTS_RATE)
-        await asyncio.wait_for(
-            communicate.save(str(output_path)),
-            timeout=TTS_TIMEOUT_SECONDS,
-        )
-    except asyncio.TimeoutError:
-        raise TTSError(f"TTS timed out after {TTS_TIMEOUT_SECONDS}s")
-    except Exception as e:
-        raise TTSError(f"Edge-TTS error: {e}") from e
+    for attempt in range(TTS_MAX_RETRIES + 1):
+        try:
+            communicate = edge_tts.Communicate(clean_text, voice, rate=TTS_RATE)
+            await asyncio.wait_for(
+                communicate.save(str(output_path)),
+                timeout=TTS_TIMEOUT_SECONDS,
+            )
+            return output_path
+        except asyncio.TimeoutError:
+            last_error = f"TTS timed out after {TTS_TIMEOUT_SECONDS}s (attempt {attempt + 1})"
+        except Exception as e:
+            last_error = f"Edge-TTS error: {e}"
+        # Brief pause before retry
+        if attempt < TTS_MAX_RETRIES:
+            await asyncio.sleep(1)
 
-    return output_path
+    raise TTSError(last_error)
 
 
 async def generate_voice_chunked(
     text: str,
     output_dir: str,
     video_id: str,
-    voice: str = "en-US-AndrewMultilingualNeural",
+    voice: str = "en-US-RogerNeural",
     on_chunk_done: ProgressCallback = None,
 ) -> List[Path]:
     """Generate voice for long text by splitting into chunks.
@@ -147,19 +155,13 @@ async def generate_voice_chunked(
     chunks = split_text_chunks(clean_text)
     total = len(chunks)
 
-    async def _generate_and_report(i: int, chunk: str, mp3_path: Path):
-        await generate_voice(chunk, mp3_path, voice=voice)
-        if on_chunk_done:
-            await on_chunk_done(i + 1, total)
-
     mp3_paths = []
     for i, chunk in enumerate(chunks):
         mp3_path = Path(output_dir) / f"voice_{video_id}_part{i}.mp3"
         mp3_paths.append(mp3_path)
-
-    # Generate sequentially so progress updates are meaningful
-    for i, (chunk, mp3_path) in enumerate(zip(chunks, mp3_paths)):
-        await _generate_and_report(i, chunk, mp3_path)
+        await generate_voice(chunk, mp3_path, voice=voice)
+        if on_chunk_done:
+            await on_chunk_done(i + 1, total)
 
     ogg_paths = []
     for mp3_path in mp3_paths:
