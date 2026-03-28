@@ -35,6 +35,11 @@ class MemoryError(Exception):
     pass
 
 
+def reinforce_confidence(x: float, k: float = 0.2) -> float:
+    """F(x) = x + k(1-x) — diminishing returns toward 1.0."""
+    return x + k * (1.0 - x)
+
+
 @dataclass
 class MemoryEntry:
     id: str
@@ -141,20 +146,43 @@ class MemoryManager:
     async def add_if_new(
         self, text: str, user_id: str, metadata: dict = None, threshold: float = 0.85
     ) -> bool:
-        """Store claim only if no similar memory exists above threshold.
+        """Store claim if new, or reinforce confidence if duplicate.
 
-        Returns True if stored, False if duplicate skipped.
+        Returns True if stored as new, False if duplicate (reinforced).
         """
+        if metadata is None:
+            metadata = {}
+
         try:
             existing = await self.search(text, user_id=user_id, limit=3)
             for mem in existing:
                 if mem.score >= threshold:
-                    logger.info(
-                        f"[DEDUP] Skipping duplicate (score={mem.score:.2f}): "
-                        f"{text[:60]}... ≈ {mem.text[:60]}..."
-                    )
+                    # Reinforce existing claim
+                    old_conf = (mem.metadata or {}).get("confidence", 0.8)
+                    old_occ = (mem.metadata or {}).get("occurrences", 1)
+                    new_conf = reinforce_confidence(old_conf)
+                    new_occ = old_occ + 1
+                    try:
+                        await asyncio.to_thread(
+                            self._memory.update,
+                            memory_id=mem.id,
+                            data=mem.text,
+                            metadata={
+                                **(mem.metadata or {}),
+                                "confidence": new_conf,
+                                "occurrences": new_occ,
+                            },
+                        )
+                        logger.info(
+                            f"[DEDUP] Reinforced (conf {old_conf:.2f}→{new_conf:.2f}, "
+                            f"occ {old_occ}→{new_occ}): {mem.text[:60]}..."
+                        )
+                    except Exception as e:
+                        logger.warning(f"[DEDUP] Failed to reinforce: {e}")
                     return False
 
+            # New claim — add with occurrences=1
+            metadata["occurrences"] = metadata.get("occurrences", 1)
             await self.add(text, user_id=user_id, metadata=metadata)
             return True
         except Exception as e:
