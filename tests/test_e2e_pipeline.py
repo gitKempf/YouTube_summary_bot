@@ -36,6 +36,7 @@ def pipeline_mgr():
     m = MagicMock()
     m.search = AsyncMock(return_value=[])
     m.add = AsyncMock()
+    m.add_if_new = AsyncMock(return_value=True)
     return m
 
 
@@ -91,10 +92,10 @@ class TestE2EPipelineVideoOne:
         assert "FOCUS ON NEW TOPICS" in mock_sum.call_args[1]["past_context"]
 
         # Verify: 2 claims stored individually (not as blob)
-        assert pipeline_mgr.add.await_count == 2
+        assert pipeline_mgr.add_if_new.await_count == 2
 
         # Verify: each claim stored with structured metadata
-        for call in pipeline_mgr.add.call_args_list:
+        for call in pipeline_mgr.add_if_new.call_args_list:
             meta = call[1].get("metadata", {})
             assert "entity" in meta
             assert "relation" in meta
@@ -105,7 +106,7 @@ class TestE2EPipelineVideoOne:
             assert meta["video_id"] == "test1"
 
         # Verify: user_id is correctly formatted
-        assert pipeline_mgr.add.call_args_list[0][1]["user_id"] == "tg_42"
+        assert pipeline_mgr.add_if_new.call_args_list[0][1]["user_id"] == "tg_42"
 
 
 class TestE2EPipelineVideoTwo:
@@ -121,7 +122,7 @@ class TestE2EPipelineVideoTwo:
             MemoryEntry(id="m1", text="AI agents need structured memory", score=0.9,
                         metadata={"entity": "AI agents", "confidence": 0.9}),
         ])
-        mgr.add = AsyncMock()
+        mgr.add_if_new = AsyncMock(return_value=True)
 
         update = MagicMock()
         update.message = MagicMock()
@@ -181,8 +182,8 @@ class TestE2EPipelineVideoTwo:
         assert "Hermes" in ctx
 
         # Verify: only NEW claims stored (not supported ones)
-        assert mgr.add.await_count == 1  # Only "Hermes uses file-based memory"
-        stored_text = mgr.add.call_args_list[0][0][0]
+        assert mgr.add_if_new.await_count == 1  # Only "Hermes uses file-based memory"
+        stored_text = mgr.add_if_new.call_args_list[0][0][0]
         assert "Hermes" in stored_text
 
 

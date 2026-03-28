@@ -299,6 +299,7 @@ class TestMemoryIntegration:
         m = MagicMock()
         m.search = AsyncMock(return_value=[])
         m.add = AsyncMock()
+        m.add_if_new = AsyncMock(return_value=True)
         return m
 
     @pytest.mark.asyncio
@@ -333,7 +334,7 @@ class TestMemoryIntegration:
             await handle_message(mock_update, mock_context)
 
         assert mock_sum.call_args[1].get("past_context") == "Context here"
-        mgr.add.assert_awaited()
+        mgr.add_if_new.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_pipeline_skips_memory_when_disabled(self, mock_update, mock_context, mock_config, mock_status_msg):
@@ -376,7 +377,7 @@ class TestMemoryIntegration:
     async def test_memory_store_failure_no_break(self, mock_update, mock_context, mock_status_msg):
         cfg = self._mem_config()
         mgr = self._mem_mgr()
-        mgr.add = AsyncMock(side_effect=Exception("Write failed"))
+        mgr.add_if_new = AsyncMock(side_effect=Exception("Write failed"))
         mock_context.bot_data = {"memory_mgr": mgr}
         mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
 

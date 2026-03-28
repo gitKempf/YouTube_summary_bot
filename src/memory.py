@@ -129,13 +129,37 @@ class MemoryManager:
             return []
 
     async def add(self, text: str, user_id: str, metadata: dict = None) -> None:
+        """Store claim verbatim with metadata. No LLM rewriting."""
         try:
-            kwargs = {"user_id": user_id, "infer": True}
+            kwargs = {"user_id": user_id, "infer": False}
             if metadata:
                 kwargs["metadata"] = metadata
             await asyncio.to_thread(self._memory.add, text, **kwargs)
         except Exception as e:
             logger.warning(f"Memory add failed: {e}")
+
+    async def add_if_new(
+        self, text: str, user_id: str, metadata: dict = None, threshold: float = 0.85
+    ) -> bool:
+        """Store claim only if no similar memory exists above threshold.
+
+        Returns True if stored, False if duplicate skipped.
+        """
+        try:
+            existing = await self.search(text, user_id=user_id, limit=3)
+            for mem in existing:
+                if mem.score >= threshold:
+                    logger.info(
+                        f"[DEDUP] Skipping duplicate (score={mem.score:.2f}): "
+                        f"{text[:60]}... ≈ {mem.text[:60]}..."
+                    )
+                    return False
+
+            await self.add(text, user_id=user_id, metadata=metadata)
+            return True
+        except Exception as e:
+            logger.warning(f"add_if_new failed: {e}")
+            return False
 
     async def get_all(self, user_id: str) -> List[MemoryEntry]:
         try:

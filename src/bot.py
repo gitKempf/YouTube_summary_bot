@@ -258,6 +258,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await progress.update(96, "Saving to memory...")
                 stored = 0
+                skipped = 0
                 for cc in fact_check_result.new_claims:
                     claim = cc.claim
                     meta = {
@@ -268,11 +269,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "video_id": claim.video_id,
                         "timestamp": claim.timestamp,
                     }
-                    await memory_mgr.add(
+                    was_new = await memory_mgr.add_if_new(
                         claim.text, user_id=user_mem_id, metadata=meta
                     )
-                    stored += 1
-                logger.info(f"[MEMORY] Stored {stored} individual claims for {user_mem_id}")
+                    if was_new:
+                        stored += 1
+                    else:
+                        skipped += 1
+                logger.info(
+                    f"[MEMORY] Stored {stored} new, skipped {skipped} duplicates for {user_mem_id}"
+                )
             except Exception as e:
                 logger.warning(f"Failed to store memories: {e}", exc_info=True)
 

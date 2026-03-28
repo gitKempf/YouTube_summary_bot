@@ -145,8 +145,8 @@ class TestTemporalValidity:
 # ============================================================
 class TestDeduplication:
     @patch("src.memory.Memory.from_config")
-    def test_memory_add_uses_infer_true(self, mock_from_config):
-        """Verify that infer=True is passed to Mem0 for dedup/merge."""
+    def test_memory_add_uses_infer_false(self, mock_from_config):
+        """Verify that infer=False is passed to Mem0 for verbatim storage."""
         mock_mem = MagicMock()
         mock_from_config.return_value = mock_mem
         config = MagicMock()
@@ -157,6 +157,7 @@ class TestDeduplication:
         config.neo4j_password = "pass"
         config.claude_model = "claude-sonnet-4-6"
         config.anthropic_api_key = "fake"
+        config.openai_api_key = ""
 
         import asyncio
         mgr = MemoryManager(config)
@@ -165,7 +166,7 @@ class TestDeduplication:
         )
 
         call_kwargs = mock_mem.add.call_args[1]
-        assert call_kwargs["infer"] is True
+        assert call_kwargs["infer"] is False
         assert call_kwargs["user_id"] == "u1"
 
 
