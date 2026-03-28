@@ -88,3 +88,50 @@ class TestSummarizeText:
         call_kwargs = mock_client.messages.create.call_args[1]
         assert call_kwargs["model"] == "claude-opus-4-6"
         assert call_kwargs["max_tokens"] == 2048
+
+    @pytest.mark.asyncio
+    @patch("src.summarizer.AsyncAnthropic")
+    async def test_with_past_context_augments_prompt(self, mock_ant_class):
+        mock_client = MagicMock()
+        mock_ant_class.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="Summary")]
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+
+        await summarize_text(
+            "transcript", api_key="fake",
+            past_context="User already knows about Python."
+        )
+
+        call_kwargs = mock_client.messages.create.call_args[1]
+        system = call_kwargs["system"]
+        assert "User already knows about Python." in system
+        assert "narrator" in system.lower() or "voiceover" in system.lower()
+
+    @pytest.mark.asyncio
+    @patch("src.summarizer.AsyncAnthropic")
+    async def test_without_past_context_uses_original(self, mock_ant_class):
+        mock_client = MagicMock()
+        mock_ant_class.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="Summary")]
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+
+        await summarize_text("transcript", api_key="fake")
+
+        call_kwargs = mock_client.messages.create.call_args[1]
+        assert call_kwargs["system"] == SYSTEM_PROMPT
+
+    @pytest.mark.asyncio
+    @patch("src.summarizer.AsyncAnthropic")
+    async def test_with_empty_context_uses_original(self, mock_ant_class):
+        mock_client = MagicMock()
+        mock_ant_class.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="Summary")]
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+
+        await summarize_text("transcript", api_key="fake", past_context="")
+
+        call_kwargs = mock_client.messages.create.call_args[1]
+        assert call_kwargs["system"] == SYSTEM_PROMPT

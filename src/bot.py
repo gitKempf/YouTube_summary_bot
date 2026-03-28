@@ -14,6 +14,8 @@ from telegram.ext import (
 
 from src.config import get_config
 from src.downloader import download_audio, extract_video_id, fetch_transcript
+from src.fact_checker import extract_claims, classify_claims, build_context_prompt
+from src.memory import MemoryManager
 from src.transcriber import transcribe_audio, TranscriptionError
 from src.summarizer import summarize_text, SummarizationError
 from src.tts import generate_voice_chunked, get_voice_for_language, TTSError
@@ -178,13 +180,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             language_code = transcription.language_code
             await progress.update(25, "Transcription complete")
 
-        # Step 2: Summarize (-> 50%)
-        await progress.update(28, "Generating summary with Claude...")
+        # Step 2: Memory — fact check & retrieve context (10% -> 20%)
+        past_context = None
+        fact_check_result = None
+        memory_mgr = None
+        user_mem_id = f"tg_{update.effective_user.id}"
+
+        if config.memory_enabled:
+            try:
+                await progress.update(12, "Analyzing topics...")
+                memory_mgr = MemoryManager(config)
+                claims = await extract_claims(
+                    transcript_text, config.anthropic_api_key, config.claude_model
+                )
+                await progress.update(15, "Searching your memory...")
+                memories = await memory_mgr.search(
+                    transcript_text[:500], user_id=user_mem_id
+                )
+                await progress.update(18, "Checking what's new...")
+                fact_check_result = await classify_claims(
+                    claims, memories, config.anthropic_api_key, config.claude_model
+                )
+                past_context = build_context_prompt(fact_check_result)
+                await progress.update(20, "Context ready")
+            except Exception as e:
+                logger.warning(f"Memory system error, proceeding without context: {e}")
+                past_context = None
+                fact_check_result = None
+
+        # Step 3: Summarize (20% -> 50%)
+        await progress.update(22, "Generating summary with Claude...")
         summary = await summarize_text(
             transcript_text,
             config.anthropic_api_key,
             model=config.claude_model,
             max_tokens=config.max_tokens,
+            past_context=past_context,
         )
         await progress.update(50, "Summary generated")
 
@@ -204,7 +235,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except TTSError as e:
             logger.warning(f"TTS failed, skipping voice: {e}")
 
-        # Step 4: Done
+        # Step 4: Store new facts in memory (95% -> 97%)
+        if config.memory_enabled and fact_check_result and memory_mgr:
+            try:
+                await progress.update(96, "Saving to memory...")
+                new_facts = "\n".join(
+                    c.claim.text for c in fact_check_result.new_claims
+                )
+                if new_facts:
+                    await memory_mgr.add(new_facts, user_id=user_mem_id)
+            except Exception as e:
+                logger.warning(f"Failed to store memories: {e}")
+
+        # Step 5: Done
         await progress.update(100, "Done!")
 
         # Send text

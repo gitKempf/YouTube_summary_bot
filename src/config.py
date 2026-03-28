@@ -1,6 +1,5 @@
 import os
 from dataclasses import dataclass, field
-from typing import Set
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,10 +15,19 @@ class Config:
     tts_voice: str = "en-US-RogerNeural"
     claude_model: str = "claude-sonnet-4-6"
     max_tokens: int = 4096
+    # Memory system (opt-in)
+    memory_enabled: bool = False
+    voyage_api_key: str = ""
+    pg_host: str = "localhost"
+    pg_port: int = 5432
+    pg_dbname: str = "mem0"
+    neo4j_url: str = "bolt://localhost:7687"
+    neo4j_username: str = "neo4j"
+    neo4j_password: str = "password"
 
     def is_user_allowed(self, user_id: int) -> bool:
         if not self.allowed_user_ids:
-            return True  # empty whitelist = allow all
+            return True
         return user_id in self.allowed_user_ids
 
 
@@ -46,10 +54,20 @@ def get_config() -> Config:
 
     required_channel = os.getenv("REQUIRED_CHANNEL", "")
 
+    voyage_key = os.getenv("VOYAGE_API_KEY", "")
+
     return Config(
         telegram_bot_token=token,
         elevenlabs_api_key=el_key,
         anthropic_api_key=ant_key,
         allowed_user_ids=allowed,
         required_channel=required_channel,
+        memory_enabled=bool(voyage_key),
+        voyage_api_key=voyage_key,
+        pg_host=os.getenv("MEM0_PG_HOST", "localhost"),
+        pg_port=int(os.getenv("MEM0_PG_PORT", "5432")),
+        pg_dbname=os.getenv("MEM0_PG_DBNAME", "mem0"),
+        neo4j_url=os.getenv("MEM0_NEO4J_URL", "bolt://localhost:7687"),
+        neo4j_username=os.getenv("MEM0_NEO4J_USER", "neo4j"),
+        neo4j_password=os.getenv("MEM0_NEO4J_PASSWORD", "password"),
     )

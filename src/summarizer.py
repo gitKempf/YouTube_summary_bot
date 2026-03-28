@@ -28,9 +28,14 @@ async def summarize_text(
     api_key: str,
     model: str = "claude-sonnet-4-6",
     max_tokens: int = 4096,
+    past_context: str = None,
 ) -> str:
     if not text or not text.strip():
         raise ValueError("Cannot summarize empty text")
+
+    system = SYSTEM_PROMPT
+    if past_context and past_context.strip():
+        system = f"{past_context}\n\n---\n\n{SYSTEM_PROMPT}"
 
     client = AsyncAnthropic(api_key=api_key)
 
@@ -38,7 +43,7 @@ async def summarize_text(
         message = await client.messages.create(
             model=model,
             max_tokens=max_tokens,
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=[
                 {
                     "role": "user",

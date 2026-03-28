@@ -83,3 +83,27 @@ def test_is_user_allowed_in_whitelist(monkeypatch):
     config = get_config()
     assert config.is_user_allowed(123) is True
     assert config.is_user_allowed(999) is False
+
+
+def test_config_memory_disabled_by_default(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "e")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    config = get_config()
+    assert config.memory_enabled is False
+    assert config.voyage_api_key == ""
+
+
+def test_config_memory_enabled_when_configured(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "e")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a")
+    monkeypatch.setenv("VOYAGE_API_KEY", "voyage-key")
+    monkeypatch.setenv("MEM0_PG_HOST", "db.example.com")
+    monkeypatch.setenv("MEM0_NEO4J_URL", "bolt://graph:7687")
+    config = get_config()
+    assert config.memory_enabled is True
+    assert config.voyage_api_key == "voyage-key"
+    assert config.pg_host == "db.example.com"
+    assert config.neo4j_url == "bolt://graph:7687"

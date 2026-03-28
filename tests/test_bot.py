@@ -7,6 +7,7 @@ from src.downloader import TranscriptFetchResult
 from src.transcriber import TranscriptionError, TranscriptionResult
 from src.summarizer import SummarizationError
 from src.tts import TTSError
+from src.fact_checker import Claim, ClassifiedClaim, ClaimStatus, FactCheckResult
 
 
 @pytest.fixture
@@ -282,3 +283,176 @@ class TestHandleMessageErrors:
              patch("src.bot.Path.unlink") as mu:
             await handle_message(mock_update, mock_context)
         assert mu.called
+
+
+class TestMemoryIntegration:
+    @pytest.mark.asyncio
+    async def test_pipeline_uses_memory_when_enabled(self, mock_update, mock_context, mock_status_msg):
+        mock_config = MagicMock()
+        mock_config.memory_enabled = True
+        mock_config.is_user_allowed.return_value = True
+        mock_config.anthropic_api_key = "fake"
+        mock_config.claude_model = "claude-sonnet-4-6"
+        mock_config.max_tokens = 4096
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+        mock_update.effective_user.id = 12345
+
+        fact_result = FactCheckResult(
+            new_claims=[ClassifiedClaim(Claim("New fact", "X", "is", "Y"), ClaimStatus.NEW)],
+            supported_claims=[], contradicted_claims=[], context_summary="",
+        )
+
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   return_value=TranscriptFetchResult(text="T", language_code="en")), \
+             patch("src.bot.MemoryManager") as mock_mgr_cls, \
+             patch("src.bot.extract_claims", new_callable=AsyncMock,
+                   return_value=[Claim("New fact", "X", "is", "Y")]), \
+             patch("src.bot.classify_claims", new_callable=AsyncMock,
+                   return_value=fact_result), \
+             patch("src.bot.build_context_prompt", return_value="Context here") as mock_bcp, \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Sum") as mock_sum, \
+             patch("src.bot.get_voice_for_language", return_value="en-US-RogerNeural"), \
+             patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
+                   return_value=[Path("/tmp/v.ogg")]), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            mock_mgr = MagicMock()
+            mock_mgr.search = AsyncMock(return_value=[])
+            mock_mgr.add = AsyncMock()
+            mock_mgr_cls.return_value = mock_mgr
+            await handle_message(mock_update, mock_context)
+
+        # Summarize called with past_context
+        assert mock_sum.call_args[1].get("past_context") == "Context here"
+        # Memory add was called
+        mock_mgr.add.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_pipeline_skips_memory_when_disabled(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_config.memory_enabled = False
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+        p = _happy_patches(mock_config)
+        with p["config"], p["vid"], p["thread"], p["sum"] as mock_sum, p["voice"], \
+             p["tts"], p["open"], p["exists"], p["unlink"], \
+             patch("src.bot.MemoryManager") as mock_mgr_cls:
+            await handle_message(mock_update, mock_context)
+        mock_mgr_cls.assert_not_called()
+        # summarize_text should not have past_context
+        assert mock_sum.call_args[1].get("past_context") is None
+
+    @pytest.mark.asyncio
+    async def test_memory_failure_falls_back(self, mock_update, mock_context, mock_status_msg):
+        mock_config = MagicMock()
+        mock_config.memory_enabled = True
+        mock_config.is_user_allowed.return_value = True
+        mock_config.anthropic_api_key = "fake"
+        mock_config.claude_model = "claude-sonnet-4-6"
+        mock_config.max_tokens = 4096
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   return_value=TranscriptFetchResult(text="T", language_code="en")), \
+             patch("src.bot.MemoryManager", side_effect=Exception("DB down")), \
+             patch("src.bot.extract_claims", new_callable=AsyncMock,
+                   side_effect=Exception("LLM failed")), \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Sum") as mock_sum, \
+             patch("src.bot.get_voice_for_language", return_value="en-US-RogerNeural"), \
+             patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
+                   return_value=[Path("/tmp/v.ogg")]), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            await handle_message(mock_update, mock_context)
+
+        # Summarize still called (without context)
+        mock_sum.assert_awaited_once()
+        assert mock_sum.call_args[1].get("past_context") is None
+
+    @pytest.mark.asyncio
+    async def test_memory_store_failure_no_break(self, mock_update, mock_context, mock_status_msg):
+        mock_config = MagicMock()
+        mock_config.memory_enabled = True
+        mock_config.is_user_allowed.return_value = True
+        mock_config.anthropic_api_key = "fake"
+        mock_config.claude_model = "claude-sonnet-4-6"
+        mock_config.max_tokens = 4096
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
+        fact_result = FactCheckResult(
+            new_claims=[ClassifiedClaim(Claim("Fact", "X", "is", "Y"), ClaimStatus.NEW)],
+            supported_claims=[], contradicted_claims=[], context_summary="",
+        )
+
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   return_value=TranscriptFetchResult(text="T", language_code="en")), \
+             patch("src.bot.MemoryManager") as mock_mgr_cls, \
+             patch("src.bot.extract_claims", new_callable=AsyncMock,
+                   return_value=[Claim("Fact", "X", "is", "Y")]), \
+             patch("src.bot.classify_claims", new_callable=AsyncMock,
+                   return_value=fact_result), \
+             patch("src.bot.build_context_prompt", return_value="Ctx"), \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Sum"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-RogerNeural"), \
+             patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
+                   return_value=[Path("/tmp/v.ogg")]), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            mock_mgr = MagicMock()
+            mock_mgr.search = AsyncMock(return_value=[])
+            mock_mgr.add = AsyncMock(side_effect=Exception("Write failed"))
+            mock_mgr_cls.return_value = mock_mgr
+            await handle_message(mock_update, mock_context)
+
+        # User still gets summary (no error message)
+        calls = [str(c) for c in mock_update.message.reply_text.call_args_list]
+        assert any("Sum" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_user_id_passed_correctly(self, mock_update, mock_context, mock_status_msg):
+        mock_config = MagicMock()
+        mock_config.memory_enabled = True
+        mock_config.is_user_allowed.return_value = True
+        mock_config.anthropic_api_key = "fake"
+        mock_config.claude_model = "claude-sonnet-4-6"
+        mock_config.max_tokens = 4096
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+        mock_update.effective_user.id = 99999
+
+        fact_result = FactCheckResult(
+            new_claims=[ClassifiedClaim(Claim("F", "X", "is", "Y"), ClaimStatus.NEW)],
+            supported_claims=[], contradicted_claims=[], context_summary="",
+        )
+
+        with patch("src.bot.get_config", return_value=mock_config), \
+             patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
+             patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
+                   return_value=TranscriptFetchResult(text="T", language_code="en")), \
+             patch("src.bot.MemoryManager") as mock_mgr_cls, \
+             patch("src.bot.extract_claims", new_callable=AsyncMock,
+                   return_value=[Claim("F", "X", "is", "Y")]), \
+             patch("src.bot.classify_claims", new_callable=AsyncMock, return_value=fact_result), \
+             patch("src.bot.build_context_prompt", return_value=""), \
+             patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="S"), \
+             patch("src.bot.get_voice_for_language", return_value="en-US-RogerNeural"), \
+             patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
+                   return_value=[Path("/tmp/v.ogg")]), \
+             patch("builtins.open", MagicMock()), \
+             patch("src.bot.Path.exists", return_value=False), \
+             patch("src.bot.Path.unlink"):
+            mock_mgr = MagicMock()
+            mock_mgr.search = AsyncMock(return_value=[])
+            mock_mgr.add = AsyncMock()
+            mock_mgr_cls.return_value = mock_mgr
+            await handle_message(mock_update, mock_context)
+
+        # Verify user_id format
+        search_uid = mock_mgr.search.call_args[1]["user_id"]
+        assert search_uid == "tg_99999"
