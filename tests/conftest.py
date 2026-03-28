@@ -3,11 +3,18 @@ from unittest.mock import MagicMock, AsyncMock
 
 
 @pytest.fixture
-def mock_update():
+def mock_status_msg():
+    msg = MagicMock()
+    msg.edit_text = AsyncMock()
+    return msg
+
+
+@pytest.fixture
+def mock_update(mock_status_msg):
     update = MagicMock()
     update.message = MagicMock()
     update.message.text = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    update.message.reply_text = AsyncMock()
+    update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
     update.message.reply_voice = AsyncMock()
     update.message.chat_id = 12345
     update.effective_chat = MagicMock()

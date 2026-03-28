@@ -22,11 +22,18 @@ def mock_config():
 
 
 @pytest.fixture
-def mock_update():
+def mock_status_msg():
+    msg = MagicMock()
+    msg.edit_text = AsyncMock()
+    return msg
+
+
+@pytest.fixture
+def mock_update(mock_status_msg):
     update = MagicMock()
     update.message = MagicMock()
     update.message.text = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    update.message.reply_text = AsyncMock()
+    update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
     update.message.reply_voice = AsyncMock()
     update.effective_chat = MagicMock()
     update.effective_chat.id = 12345
@@ -40,8 +47,7 @@ def mock_context():
 
 class TestFullPipeline:
     @pytest.mark.asyncio
-    async def test_caption_path_full_pipeline(self, mock_update, mock_context, mock_config):
-        """Captions available: fetch_transcript -> summarize -> tts -> send."""
+    async def test_caption_path_full_pipeline(self, mock_update, mock_context, mock_config, mock_status_msg):
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -61,15 +67,16 @@ class TestFullPipeline:
         mock_voice.assert_awaited_once()
         assert any("Complete summary" in str(c) for c in mock_update.message.reply_text.call_args_list)
         mock_update.message.reply_voice.assert_awaited_once()
+        # Progress bar was updated
+        assert mock_status_msg.edit_text.await_count >= 3
 
     @pytest.mark.asyncio
-    async def test_fallback_path_full_pipeline(self, mock_update, mock_context, mock_config):
-        """No captions: download -> elevenlabs -> summarize -> tts -> send."""
+    async def test_fallback_path_full_pipeline(self, mock_update, mock_context, mock_config, mock_status_msg):
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    side_effect=[
-                       None,  # no captions
+                       None,
                        Path("/tmp/audio.mp4"),
                        TranscriptionResult(text="EL text", language_code="fr"),
                    ]), \
@@ -88,7 +95,7 @@ class TestFullPipeline:
         assert "EL text" in str(mock_sum.call_args)
 
     @pytest.mark.asyncio
-    async def test_tts_failure_graceful_degradation(self, mock_update, mock_context, mock_config):
+    async def test_tts_failure_graceful_degradation(self, mock_update, mock_context, mock_config, mock_status_msg):
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -105,14 +112,13 @@ class TestFullPipeline:
         mock_update.message.reply_voice.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_cleanup_always_happens(self, mock_update, mock_context, mock_config):
-        """When fallback path is used and fails, audio files should still be cleaned up."""
+    async def test_cleanup_always_happens(self, mock_update, mock_context, mock_config, mock_status_msg):
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    side_effect=[
-                       None,  # no captions
-                       Path("/tmp/audio.mp4"),  # download succeeds
+                       None,
+                       Path("/tmp/audio.mp4"),
                        TranscriptionResult(text="Text", language_code="en"),
                    ]), \
              patch("src.bot.summarize_text", new_callable=AsyncMock,

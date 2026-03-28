@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from src.bot import start_command, handle_message
+from src.bot import start_command, handle_message, _progress_bar
 from src.downloader import TranscriptFetchResult
 from src.transcriber import TranscriptionError, TranscriptionResult
 from src.summarizer import SummarizationError
@@ -21,6 +21,29 @@ def mock_config():
     return config
 
 
+@pytest.fixture
+def mock_status_msg():
+    msg = MagicMock()
+    msg.edit_text = AsyncMock()
+    return msg
+
+
+class TestProgressBar:
+    def test_zero_progress(self):
+        result = _progress_bar(0, 5, "Starting...")
+        assert "0%" in result
+        assert "Starting..." in result
+
+    def test_full_progress(self):
+        result = _progress_bar(5, 5, "Done!")
+        assert "100%" in result
+        assert "Done!" in result
+
+    def test_partial_progress(self):
+        result = _progress_bar(3, 5, "Working...")
+        assert "60%" in result
+
+
 class TestStartCommand:
     @pytest.mark.asyncio
     async def test_sends_welcome_message(self, mock_update, mock_context):
@@ -35,7 +58,9 @@ class TestHandleMessageWithCaptions:
     """Tests for the primary path: YouTube captions available."""
 
     @pytest.mark.asyncio
-    async def test_sends_processing_status(self, mock_update, mock_context, mock_config):
+    async def test_edits_progress_messages(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -49,11 +74,13 @@ class TestHandleMessageWithCaptions:
              patch("src.bot.Path.unlink"):
             await handle_message(mock_update, mock_context)
 
-        first_call = mock_update.message.reply_text.call_args_list[0]
-        assert "processing" in first_call[0][0].lower()
+        # Progress message should be edited multiple times
+        assert mock_status_msg.edit_text.await_count >= 3
 
     @pytest.mark.asyncio
-    async def test_uses_youtube_captions_when_available(self, mock_update, mock_context, mock_config):
+    async def test_uses_youtube_captions_when_available(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -67,13 +94,14 @@ class TestHandleMessageWithCaptions:
              patch("src.bot.Path.unlink"):
             await handle_message(mock_update, mock_context)
 
-        # Only one to_thread call (fetch_transcript), not download+transcribe
         assert mock_thread.call_count == 1
         mock_sum.assert_awaited_once()
         assert "Caption text" in str(mock_sum.call_args)
 
     @pytest.mark.asyncio
-    async def test_sends_summary_text(self, mock_update, mock_context, mock_config):
+    async def test_sends_summary_text(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -91,7 +119,9 @@ class TestHandleMessageWithCaptions:
         assert any("Summary text" in str(c) for c in calls)
 
     @pytest.mark.asyncio
-    async def test_sends_voice_message(self, mock_update, mock_context, mock_config):
+    async def test_sends_voice_message(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -108,7 +138,9 @@ class TestHandleMessageWithCaptions:
         mock_update.message.reply_voice.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_tts_with_detected_language(self, mock_update, mock_context, mock_config):
+    async def test_tts_with_detected_language(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -126,16 +158,16 @@ class TestHandleMessageWithCaptions:
 
 
 class TestHandleMessageFallbackToElevenLabs:
-    """Tests for the fallback path: no captions, use audio download + ElevenLabs."""
-
     @pytest.mark.asyncio
-    async def test_falls_back_to_audio_download(self, mock_update, mock_context, mock_config):
+    async def test_falls_back_to_audio_download(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    side_effect=[
-                       None,  # fetch_transcript returns None
-                       Path("/tmp/audio.mp4"),  # download_audio
+                       None,
+                       Path("/tmp/audio.mp4"),
                        TranscriptionResult(text="EL transcript", language_code="en"),
                    ]) as mock_thread, \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary") as mock_sum, \
@@ -147,7 +179,6 @@ class TestHandleMessageFallbackToElevenLabs:
              patch("src.bot.Path.unlink"):
             await handle_message(mock_update, mock_context)
 
-        # Three to_thread calls: fetch_transcript + download_audio + transcribe_audio
         assert mock_thread.call_count == 3
         mock_sum.assert_awaited_once()
         assert "EL transcript" in str(mock_sum.call_args)
@@ -155,7 +186,9 @@ class TestHandleMessageFallbackToElevenLabs:
 
 class TestHandleMessageErrors:
     @pytest.mark.asyncio
-    async def test_download_error_sends_message(self, mock_update, mock_context, mock_config):
+    async def test_download_error_sends_message(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -168,7 +201,9 @@ class TestHandleMessageErrors:
         assert "Sorry" in error_call[0][0] or "error" in error_call[0][0].lower()
 
     @pytest.mark.asyncio
-    async def test_transcription_error_sends_message(self, mock_update, mock_context, mock_config):
+    async def test_transcription_error_sends_message(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -181,7 +216,9 @@ class TestHandleMessageErrors:
         assert "Sorry" in error_call[0][0]
 
     @pytest.mark.asyncio
-    async def test_summarization_error_sends_message(self, mock_update, mock_context, mock_config):
+    async def test_summarization_error_sends_message(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -196,7 +233,9 @@ class TestHandleMessageErrors:
         assert "Sorry" in error_call[0][0]
 
     @pytest.mark.asyncio
-    async def test_tts_failure_still_sends_text(self, mock_update, mock_context, mock_config):
+    async def test_tts_failure_still_sends_text(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
@@ -213,7 +252,9 @@ class TestHandleMessageErrors:
         mock_update.message.reply_voice.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_cleanup_on_exception(self, mock_update, mock_context, mock_config):
+    async def test_cleanup_on_exception(self, mock_update, mock_context, mock_config, mock_status_msg):
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+
         with patch("src.bot.get_config", return_value=mock_config), \
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
