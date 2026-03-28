@@ -37,30 +37,23 @@ class MemoryManager:
                 "provider": "huggingface",
                 "config": {
                     "model": "sentence-transformers/all-MiniLM-L6-v2",
-                    "embedding_model_dims": 384,
-                },
-            },
-            "vector_store": {
-                "provider": "pgvector",
-                "config": {
-                    "host": config.pg_host,
-                    "port": config.pg_port,
-                    "dbname": config.pg_dbname,
-                    "user": "postgres",
-                    "password": "postgres",
-                    "embedding_model_dims": 384,
-                },
-            },
-            "graph_store": {
-                "provider": "neo4j",
-                "config": {
-                    "url": config.neo4j_url,
-                    "username": config.neo4j_username,
-                    "password": config.neo4j_password,
+                    "embedding_dims": 384,
                 },
             },
             "version": "v1.1",
         }
+
+        # Qdrant in-memory vector store (zero config, persistent via disk)
+        mem0_config["vector_store"] = {
+            "provider": "qdrant",
+            "config": {
+                "collection_name": "youtube_bot_memories",
+                "embedding_model_dims": 384,
+                "on_disk": True,
+                "path": "/tmp/mem0_qdrant",
+            },
+        }
+
         self._memory = Memory.from_config(config_dict=mem0_config)
 
     async def search(
@@ -84,7 +77,9 @@ class MemoryManager:
 
     async def add(self, text: str, user_id: str) -> None:
         try:
-            await asyncio.to_thread(self._memory.add, text, user_id=user_id)
+            await asyncio.to_thread(
+                self._memory.add, text, user_id=user_id, infer=False
+            )
         except Exception as e:
             logger.warning(f"Memory add failed: {e}")
 

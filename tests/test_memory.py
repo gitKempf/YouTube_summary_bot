@@ -27,8 +27,7 @@ class TestMemoryManager:
         mock_from_config.assert_called_once()
         call_kwargs = mock_from_config.call_args[1]
         cfg = call_kwargs["config_dict"]
-        assert cfg["vector_store"]["provider"] == "pgvector"
-        assert cfg["graph_store"]["provider"] == "neo4j"
+        assert cfg["vector_store"]["provider"] == "qdrant"
         assert cfg["embedder"]["provider"] == "huggingface"
 
     @pytest.mark.asyncio
