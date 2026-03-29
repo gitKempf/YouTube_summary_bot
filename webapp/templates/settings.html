@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>YouTube Summary Bot</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
     <style>
         :root {
             --bg: var(--tg-theme-bg-color, #fff);
@@ -19,191 +20,128 @@
             --card-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
             --radius: 14px;
         }
-
         * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-        body {
-            font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
-            background: var(--secondary); color: var(--text);
-            padding: 0; min-height: 100vh;
-            -webkit-font-smoothing: antialiased;
-        }
+        body { font-family: -apple-system, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+               background: var(--secondary); color: var(--text); padding: 0; min-height: 100vh;
+               -webkit-font-smoothing: antialiased; }
 
-        /* Header */
-        .header {
-            background: var(--bg); padding: 20px 20px 0;
-            position: sticky; top: 0; z-index: 10;
-        }
+        .header { background: var(--bg); padding: 20px 20px 0; position: sticky; top: 0; z-index: 10; }
         .header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
 
-        /* Tab bar */
-        .tabs {
-            display: flex; gap: 0; padding: 16px 20px 0;
-            background: var(--bg);
-            position: sticky; top: 52px; z-index: 10;
-        }
-        .tab {
-            flex: 1; text-align: center; padding: 10px 0 14px;
-            font-size: 13px; font-weight: 600; color: var(--hint);
-            cursor: pointer; border-bottom: 2px solid transparent;
-            transition: all 0.2s ease;
-            text-decoration: none;
-        }
+        .tabs { display: flex; gap: 0; padding: 16px 20px 0; background: var(--bg);
+                position: sticky; top: 52px; z-index: 10; }
+        .tab { flex: 1; text-align: center; padding: 10px 0 14px; font-size: 13px; font-weight: 600;
+               color: var(--hint); cursor: pointer; border-bottom: 2px solid transparent;
+               transition: all 0.2s ease; text-decoration: none; }
         .tab.active { color: var(--link); border-bottom-color: var(--link); }
-        .tab:not(.active):hover { color: var(--text); }
 
-        /* Content area */
         .content { padding: 12px 16px 32px; }
 
-        /* Metric cards */
-        .metrics {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
-            margin-bottom: 16px;
-        }
-        .metric {
-            background: var(--bg); border-radius: var(--radius); padding: 16px;
-            box-shadow: var(--card-shadow);
-        }
-        .metric .value {
-            font-size: 32px; font-weight: 700;
-            background: linear-gradient(135deg, var(--link), #5856d6);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
+        .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+        .metric { background: var(--bg); border-radius: var(--radius); padding: 16px; box-shadow: var(--card-shadow); }
+        .metric .value { font-size: 32px; font-weight: 700;
+                         background: linear-gradient(135deg, var(--link), #5856d6);
+                         -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
         .metric .label { font-size: 12px; color: var(--hint); margin-top: 2px; font-weight: 500; }
 
-        /* Search */
-        .search-wrap {
-            position: relative; margin-bottom: 12px;
-        }
-        .search-wrap svg {
-            position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-            width: 16px; height: 16px; color: var(--hint);
-        }
-        .search {
-            width: 100%; padding: 11px 12px 11px 36px;
-            border: none; border-radius: 12px;
-            font-size: 15px; background: var(--bg); color: var(--text);
-            box-shadow: var(--card-shadow);
-            transition: box-shadow 0.2s;
-        }
+        .toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; }
+        .search-wrap { position: relative; flex: 1; }
+        .search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+                           width: 16px; height: 16px; color: var(--hint); }
+        .search { width: 100%; padding: 11px 12px 11px 36px; border: none; border-radius: 12px;
+                  font-size: 15px; background: var(--bg); color: var(--text);
+                  box-shadow: var(--card-shadow); transition: box-shadow 0.2s; }
         .search:focus { outline: none; box-shadow: 0 0 0 2px var(--link); }
         .search::placeholder { color: var(--hint); }
 
-        /* Document list */
-        .list-card {
-            background: var(--bg); border-radius: var(--radius);
-            box-shadow: var(--card-shadow); overflow: hidden;
-        }
-        .doc {
-            padding: 14px 16px; border-bottom: 1px solid var(--separator);
-            transition: background 0.15s;
-        }
+        /* Three-dot menu */
+        .menu-wrap { position: relative; }
+        .menu-btn { width: 40px; height: 40px; border: none; border-radius: 12px; background: var(--bg);
+                    box-shadow: var(--card-shadow); cursor: pointer; font-size: 18px; color: var(--hint);
+                    display: flex; align-items: center; justify-content: center; }
+        .menu-dropdown { display: none; position: absolute; right: 0; top: 44px; background: var(--bg);
+                         border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.12); z-index: 20;
+                         min-width: 200px; overflow: hidden; }
+        .menu-dropdown.open { display: block; }
+        .menu-item { padding: 14px 16px; font-size: 14px; cursor: pointer; border-bottom: 1px solid var(--separator);
+                     transition: background 0.15s; }
+        .menu-item:last-child { border-bottom: none; }
+        .menu-item:active { background: var(--secondary); }
+
+        .list-card { background: var(--bg); border-radius: var(--radius); box-shadow: var(--card-shadow); overflow: hidden; }
+        .doc { padding: 14px 16px; border-bottom: 1px solid var(--separator); transition: background 0.15s; }
         .doc:last-child { border-bottom: none; }
         .doc:active { background: var(--secondary); }
-        .doc a {
-            color: var(--text); text-decoration: none; font-size: 15px;
-            font-weight: 500; line-height: 1.35; display: block;
-        }
-        .doc-meta {
-            display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-            margin-top: 6px; font-size: 12px; color: var(--hint);
-        }
-        .chip {
-            display: inline-flex; align-items: center; gap: 3px;
-            padding: 3px 8px; border-radius: 6px;
-            font-size: 11px; font-weight: 600;
-        }
+        .doc a, .doc-title { color: var(--text); text-decoration: none; font-size: 15px;
+                             font-weight: 500; line-height: 1.35; display: block; }
+        .doc-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+                    margin-top: 6px; font-size: 12px; color: var(--hint); }
+        .chip { display: inline-flex; align-items: center; gap: 3px; padding: 3px 8px;
+                border-radius: 6px; font-size: 11px; font-weight: 600; }
         .chip-green { background: rgba(52,199,89,0.12); color: #248a3d; }
         .chip-orange { background: rgba(255,149,0,0.12); color: #c93400; }
+        .chip-blue { background: rgba(0,122,255,0.1); color: #007aff; }
+        .chip-link { cursor: pointer; }
 
-        /* Empty state */
         .empty { text-align: center; padding: 48px 24px; color: var(--hint); }
         .empty .icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
         .empty p { font-size: 15px; line-height: 1.4; }
 
-        /* Settings cards */
-        .settings-group {
-            background: var(--bg); border-radius: var(--radius);
-            box-shadow: var(--card-shadow); overflow: hidden;
-            margin-bottom: 12px;
-        }
-        .settings-row {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 14px 16px; border-bottom: 1px solid var(--separator);
-        }
-        .settings-row:last-child { border-bottom: none; }
-        .settings-row .label { font-size: 15px; font-weight: 400; }
+        .key-card { background: var(--bg); border-radius: var(--radius); box-shadow: var(--card-shadow);
+                    padding: 16px; margin-bottom: 12px; }
+        .key-card label { display: block; font-size: 13px; font-weight: 600; color: var(--hint);
+                          text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .key-card input { width: 100%; padding: 12px 14px; border: 1.5px solid var(--separator);
+                          border-radius: 10px; font-size: 15px; background: var(--bg); color: var(--text); }
+        .key-card input:focus { outline: none; border-color: var(--link); }
+        .key-card .hint { font-size: 12px; color: var(--hint); margin-top: 8px; line-height: 1.4; }
+        .key-card .hint a { color: var(--link); text-decoration: none; }
+        .key-actions { display: flex; gap: 8px; margin-top: 12px; }
+        .key-actions .btn { flex: 1; }
+
         .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
         .status-dot.on { background: #34c759; }
         .status-dot.off { background: #ff9500; }
         .status-text { font-size: 13px; color: var(--hint); display: flex; align-items: center; }
 
-        .key-card {
-            background: var(--bg); border-radius: var(--radius);
-            box-shadow: var(--card-shadow); padding: 16px;
-            margin-bottom: 12px;
-        }
-        .key-card label {
-            display: block; font-size: 13px; font-weight: 600; color: var(--hint);
-            text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
-        }
-        .key-card input {
-            width: 100%; padding: 12px 14px; border: 1.5px solid var(--separator);
-            border-radius: 10px; font-size: 15px; background: var(--bg); color: var(--text);
-            transition: border-color 0.2s;
-        }
-        .key-card input:focus { outline: none; border-color: var(--link); }
-        .key-card .hint {
-            font-size: 12px; color: var(--hint); margin-top: 8px; line-height: 1.4;
-        }
-        .key-card .hint a { color: var(--link); text-decoration: none; }
-        .key-actions { display: flex; gap: 8px; margin-top: 12px; }
-        .key-actions .btn { flex: 1; }
-
-        .btn {
-            display: block; width: 100%; padding: 13px;
-            border: none; border-radius: 12px;
-            font-size: 15px; font-weight: 600; cursor: pointer;
-            transition: transform 0.1s, opacity 0.2s;
-        }
+        .btn { display: block; width: 100%; padding: 13px; border: none; border-radius: 12px;
+               font-size: 15px; font-weight: 600; cursor: pointer; transition: transform 0.1s, opacity 0.2s; }
         .btn:active { transform: scale(0.98); }
         .btn-primary { background: var(--btn); color: var(--btn-text); }
-        .btn-danger {
-            background: rgba(255,59,48,0.1); color: var(--destructive);
-        }
-        .btn-danger:hover { background: rgba(255,59,48,0.15); }
+        .btn-danger { background: rgba(255,59,48,0.1); color: var(--destructive); }
 
         .section { display: none; }
         .section.visible { display: block; }
 
-        .toast {
-            position: fixed; bottom: 32px; left: 16px; right: 16px;
-            padding: 14px 20px; border-radius: 14px;
-            text-align: center; font-size: 14px; font-weight: 600;
-            z-index: 100; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-            transform: translateY(100px); opacity: 0;
-            transition: all 0.35s cubic-bezier(0.32, 0.72, 0, 1);
-        }
+        .toast { position: fixed; bottom: 32px; left: 16px; right: 16px; padding: 14px 20px;
+                 border-radius: 14px; text-align: center; font-size: 14px; font-weight: 600;
+                 z-index: 100; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+                 transform: translateY(100px); opacity: 0;
+                 transition: all 0.35s cubic-bezier(0.32, 0.72, 0, 1); }
         .toast.show { transform: translateY(0); opacity: 1; }
         .toast.success { background: rgba(52,199,89,0.9); color: #fff; }
         .toast.error { background: rgba(255,59,48,0.9); color: #fff; }
 
-        .claim-detail { font-size: 13px; color: var(--hint); margin-top: 4px; }
-        .claim-detail span { margin-right: 8px; }
-        .entity-claims { font-size: 13px; color: var(--hint); margin-top: 6px; line-height: 1.5; }
-        .conf-bar { display: inline-block; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+        .claim-meta { font-size: 12px; color: var(--hint); margin-top: 6px; display: flex;
+                      flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+        .conf-bar { display: inline-block; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 3px; }
+        .claim-triple { font-size: 13px; color: var(--text); margin-top: 4px; opacity: 0.7; }
 
-        .section-label {
-            font-size: 13px; font-weight: 600; color: var(--hint);
-            text-transform: uppercase; letter-spacing: 0.5px;
-            padding: 0 4px; margin-bottom: 8px;
-        }
+        #graph-container { width: 100%; height: 400px; background: var(--bg); border-radius: var(--radius);
+                           box-shadow: var(--card-shadow); margin-top: 4px; }
+        .graph-info { text-align: center; padding: 12px; font-size: 13px; color: var(--hint);
+                      background: var(--bg); border-radius: var(--radius); box-shadow: var(--card-shadow);
+                      margin-top: 8px; }
+
+        .filter-banner { display: flex; align-items: center; justify-content: space-between;
+                         background: rgba(0,122,255,0.08); border-radius: 10px; padding: 10px 14px;
+                         margin-bottom: 12px; font-size: 13px; color: var(--link); }
+        .filter-banner button { background: none; border: none; color: var(--link); font-weight: 600;
+                                cursor: pointer; font-size: 13px; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>Summary Bot</h1>
-    </div>
+    <div class="header"><h1>Summary Bot</h1></div>
 
     <div class="tabs">
         <div class="tab active" onclick="showSection('docs')" id="nav-docs">Documents</div>
@@ -211,29 +149,51 @@
         <div class="tab" onclick="showSection('settings')" id="nav-settings">Settings</div>
     </div>
 
-    <!-- Documents -->
     <div class="content">
+        <!-- Documents -->
         <div id="docs-section" class="section visible">
             <div class="metrics">
-                <div class="metric">
-                    <div class="value" id="claim-count">—</div>
-                    <div class="label">Claims extracted</div>
-                </div>
-                <div class="metric">
-                    <div class="value" id="video-count">—</div>
-                    <div class="label">Documents</div>
+                <div class="metric"><div class="value" id="claim-count">—</div><div class="label">Claims extracted</div></div>
+                <div class="metric"><div class="value" id="video-count">—</div><div class="label">Documents</div></div>
+            </div>
+            <div class="toolbar">
+                <div class="search-wrap">
+                    <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+                    <input type="text" class="search" id="search-input" placeholder="Search documents..." oninput="filterDocs()">
                 </div>
             </div>
-
-            <div class="search-wrap">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
-                <input type="text" class="search" id="search-input"
-                       placeholder="Search documents..." oninput="filterDocs()">
-            </div>
-
             <div class="list-card" id="doc-list-wrap">
                 <div class="doc" style="color:var(--hint);text-align:center;padding:24px">Loading...</div>
             </div>
+        </div>
+
+        <!-- Knowledge -->
+        <div id="knowledge-section" class="section">
+            <div class="toolbar">
+                <div class="search-wrap">
+                    <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+                    <input type="text" class="search" id="knowledge-search" placeholder="Search..." oninput="filterKnowledge()">
+                </div>
+                <div class="menu-wrap">
+                    <button class="menu-btn" onclick="toggleMenu()">···</button>
+                    <div class="menu-dropdown" id="k-menu">
+                        <div class="menu-item" onclick="exportVault(); toggleMenu()">Export Obsidian Vault</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="claims-filter-banner" style="display:none"></div>
+
+            <div class="tabs" style="padding:0;margin-bottom:12px;position:static">
+                <div class="tab active" onclick="showKnowledgeTab('claims')" id="nav-k-claims">Claims</div>
+                <div class="tab" onclick="showKnowledgeTab('entities')" id="nav-k-entities">Entities</div>
+                <div class="tab" onclick="showKnowledgeTab('graph')" id="nav-k-graph">Graph</div>
+            </div>
+
+            <div id="claims-list" class="list-card"></div>
+            <div id="entities-list" class="list-card" style="display:none"></div>
+            <div id="graph-container" style="display:none"></div>
+            <div id="graph-info" class="graph-info" style="display:none">Tap a node to see claims</div>
         </div>
 
         <!-- Settings -->
@@ -250,7 +210,6 @@
                     <button class="btn btn-danger" id="remove-anthropic-btn" onclick="removeKey('anthropic')" style="display:none">Remove</button>
                 </div>
             </div>
-
             <div class="key-card">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                     <label style="margin:0">ElevenLabs</label>
@@ -264,83 +223,58 @@
                 </div>
             </div>
         </div>
-
-        <!-- Knowledge -->
-        <div id="knowledge-section" class="section">
-            <div class="search-wrap">
-                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
-                <input type="text" class="search" id="knowledge-search"
-                       placeholder="Search claims and entities..." oninput="filterKnowledge()">
-            </div>
-
-            <div class="tabs" style="padding:0;margin-bottom:12px;position:static">
-                <div class="tab active" onclick="showKnowledgeTab('claims')" id="nav-k-claims">Claims</div>
-                <div class="tab" onclick="showKnowledgeTab('entities')" id="nav-k-entities">Entities</div>
-            </div>
-
-            <div id="claims-list" class="list-card">
-                <div class="doc" style="color:var(--hint);text-align:center;padding:24px">Loading...</div>
-            </div>
-
-            <div id="entities-list" class="list-card" style="display:none">
-                <div class="doc" style="color:var(--hint);text-align:center;padding:24px">Loading...</div>
-            </div>
-
-            <button class="btn btn-primary" style="margin-top:16px" onclick="exportVault()">Download Obsidian Vault (ZIP)</button>
-        </div>
     </div>
 
     <div class="toast" id="toast"></div>
 
     <script>
         const tg = window.Telegram.WebApp;
-        tg.ready();
-        tg.expand();
+        tg.ready(); tg.expand();
+        if (!tg.initData) { window.location.href = '/'; }
 
-        // Redirect to landing if not inside Telegram
-        if (!tg.initData) {
-            window.location.href = '/';
-        }
-
-        // Wrap fetch to include Telegram auth + ngrok bypass
         const _fetch = window.fetch;
         window.fetch = (url, opts = {}) => {
-            opts.headers = {
-                'ngrok-skip-browser-warning': '1',
-                'X-Telegram-Init-Data': tg.initData || '',
-                ...(opts.headers || {}),
-            };
+            opts.headers = { 'ngrok-skip-browser-warning': '1', 'X-Telegram-Init-Data': tg.initData || '', ...(opts.headers || {}) };
             return _fetch(url, opts);
         };
 
         const user = tg.initDataUnsafe?.user;
         if (!user) { document.body.innerHTML = '<p style="padding:40px;text-align:center;color:#999">Open this app from Telegram.</p>'; }
         const userId = user ? `tg_${user.id}` : '';
-        let allDocs = [];
+        let allDocs = [], allClaims = [], allEntities = [];
+        let currentKTab = 'claims', claimsVideoFilter = null, graphReady = false;
 
         function showSection(name) {
             document.querySelectorAll('.section').forEach(s => s.classList.remove('visible'));
-            document.querySelectorAll('.tab[id]').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tabs > .tab[id^="nav-"]').forEach(t => {
+                if (['nav-docs','nav-knowledge','nav-settings'].includes(t.id)) t.classList.remove('active');
+            });
             document.getElementById(name + '-section').classList.add('visible');
             document.getElementById('nav-' + name).classList.add('active');
+            if (name === 'knowledge') loadKnowledge();
         }
 
         function showToast(msg, type) {
             const t = document.getElementById('toast');
-            t.textContent = msg;
-            t.className = 'toast ' + type + ' show';
+            t.textContent = msg; t.className = 'toast ' + type + ' show';
             setTimeout(() => t.classList.remove('show'), 2500);
         }
+
+        function toggleMenu() {
+            document.getElementById('k-menu').classList.toggle('open');
+        }
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.menu-wrap')) document.getElementById('k-menu')?.classList.remove('open');
+        });
 
         function updateKeyStatus(type, hasKey) {
             const el = document.getElementById(type + '-status');
             const rm = document.getElementById('remove-' + type + '-btn');
-            el.innerHTML = hasKey
-                ? '<span class="status-dot on"></span>Connected'
-                : '<span class="status-dot off"></span>Not set';
+            el.innerHTML = hasKey ? '<span class="status-dot on"></span>Connected' : '<span class="status-dot off"></span>Not set';
             rm.style.display = hasKey ? 'block' : 'none';
         }
 
+        // ── Documents ──
         function renderDocs(docs) {
             const wrap = document.getElementById('doc-list-wrap');
             if (!docs.length) {
@@ -348,13 +282,35 @@
                 return;
             }
             wrap.innerHTML = docs.map(v => {
-                const date = v.stored_at ? new Date(v.stored_at).toLocaleDateString('en-GB', {day:'numeric',month:'short',year:'numeric'}) : '';
+                const date = v.stored_at ? new Date(v.stored_at).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) : '';
                 const title = v.title || v.video_id;
                 let chips = '';
                 if (v.new_claims > 0) chips += `<span class="chip chip-green">${v.new_claims} claims</span>`;
                 if (v.duplicates > 0) chips += `<span class="chip chip-orange">${v.duplicates} reinforced</span>`;
-                return `<div class="doc"><a href="https://youtube.com/watch?v=${v.video_id}" target="_blank">${title}</a><div class="doc-meta">${date} ${chips}</div></div>`;
+                return `<div class="doc">
+                    <a href="https://youtube.com/watch?v=${v.video_id}" target="_blank">${title}</a>
+                    <div class="doc-meta">
+                        ${date} ${chips}
+                        ${v.new_claims > 0 ? `<span class="chip chip-blue chip-link" onclick="showClaimsForVideo('${v.video_id}','${title.replace(/'/g,"\\'")}')">View claims</span>` : ''}
+                    </div>
+                </div>`;
             }).join('');
+        }
+
+        function showClaimsForVideo(videoId, title) {
+            claimsVideoFilter = videoId;
+            showSection('knowledge');
+            showKnowledgeTab('claims');
+            const banner = document.getElementById('claims-filter-banner');
+            banner.style.display = 'flex';
+            banner.innerHTML = `<span>Filtered: ${title}</span><button onclick="clearClaimsFilter()">Clear</button>`;
+            renderClaims(allClaims.filter(c => c.video_id === videoId));
+        }
+
+        function clearClaimsFilter() {
+            claimsVideoFilter = null;
+            document.getElementById('claims-filter-banner').style.display = 'none';
+            renderClaims(allClaims);
         }
 
         function filterDocs() {
@@ -362,20 +318,160 @@
             renderDocs(q ? allDocs.filter(v => (v.title||'').toLowerCase().includes(q) || (v.video_id||'').toLowerCase().includes(q)) : allDocs);
         }
 
-        fetch(`/api/settings?user_id=${userId}`).then(r => r.json()).then(data => {
-            document.getElementById('claim-count').textContent = data.claim_count || 0;
-            document.getElementById('video-count').textContent = data.video_count || 0;
-            updateKeyStatus('anthropic', data.has_anthropic_key);
-            updateKeyStatus('elevenlabs', data.has_elevenlabs_key);
-            if (!data.has_anthropic_key || !data.has_elevenlabs_key) showSection('settings');
-            else showSection('docs');
-        });
+        // ── Knowledge ──
+        function showKnowledgeTab(tab) {
+            currentKTab = tab;
+            document.getElementById('claims-list').style.display = tab === 'claims' ? 'block' : 'none';
+            document.getElementById('entities-list').style.display = tab === 'entities' ? 'block' : 'none';
+            document.getElementById('graph-container').style.display = tab === 'graph' ? 'block' : 'none';
+            document.getElementById('graph-info').style.display = tab === 'graph' ? 'block' : 'none';
+            document.getElementById('nav-k-claims').classList.toggle('active', tab === 'claims');
+            document.getElementById('nav-k-entities').classList.toggle('active', tab === 'entities');
+            document.getElementById('nav-k-graph').classList.toggle('active', tab === 'graph');
+            if (tab === 'graph' && !graphReady && allEntities.length) initGraph();
+            if (tab !== 'claims') {
+                claimsVideoFilter = null;
+                document.getElementById('claims-filter-banner').style.display = 'none';
+            }
+        }
 
-        fetch(`/api/videos?user_id=${userId}`).then(r => r.json()).then(videos => {
-            allDocs = videos;
-            renderDocs(videos);
-        });
+        function loadKnowledge() {
+            fetch(`/api/claims?user_id=${userId}`).then(r => {
+                if (!r.ok) throw new Error(); return r.json();
+            }).then(claims => {
+                if (Array.isArray(claims)) {
+                    allClaims = claims;
+                    if (claimsVideoFilter) renderClaims(claims.filter(c => c.video_id === claimsVideoFilter));
+                    else renderClaims(claims);
+                }
+            }).catch(() => showToast('Failed to load claims', 'error'));
 
+            fetch(`/api/entities?user_id=${userId}`).then(r => {
+                if (!r.ok) throw new Error(); return r.json();
+            }).then(entities => {
+                if (Array.isArray(entities)) { allEntities = entities; renderEntities(entities); graphReady = false; }
+            }).catch(() => showToast('Failed to load entities', 'error'));
+        }
+
+        function renderClaims(claims) {
+            const el = document.getElementById('claims-list');
+            if (!claims.length) { el.innerHTML = '<div class="empty"><div class="icon">K</div><p>No claims yet.</p></div>'; return; }
+            el.innerHTML = claims.map(c => {
+                const conf = Math.round((c.confidence || 0) * 100);
+                const color = conf >= 80 ? '#34c759' : conf >= 50 ? '#ff9500' : '#ff3b30';
+                const date = c.timestamp ? new Date(c.timestamp).toLocaleDateString('en-GB',{day:'numeric',month:'short'}) : '';
+                return `<div class="doc">
+                    <div style="font-size:14px;line-height:1.4">${c.text}</div>
+                    ${c.entity && c.relation && c.value ? `<div class="claim-triple">${c.entity} → ${c.relation} → ${c.value}</div>` : ''}
+                    <div class="claim-meta">
+                        <span><span class="conf-bar" style="width:${Math.max(conf/3,4)}px;background:${color}"></span>${conf}%</span>
+                        ${c.entity ? `<span class="chip chip-blue" style="font-size:10px">${c.entity}</span>` : ''}
+                        ${c.occurrences > 1 ? `<span class="chip chip-orange" style="font-size:10px">${c.occurrences}x seen</span>` : ''}
+                        ${c.video_id ? `<span class="chip chip-link" style="font-size:10px" onclick="showClaimsForVideo('${c.video_id}','${c.video_id}')">${c.video_id.substring(0,8)}</span>` : ''}
+                        ${date ? `<span>${date}</span>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function renderEntities(entities) {
+            const el = document.getElementById('entities-list');
+            if (!entities.length) { el.innerHTML = '<div class="empty"><div class="icon">E</div><p>No entities yet.</p></div>'; return; }
+            el.innerHTML = entities.map(e => {
+                const rels = (e.relationships || []).slice(0, 5).map(r =>
+                    `<span class="chip chip-blue" style="font-size:10px">${r.relation} → ${r.target}</span>`
+                ).join(' ');
+                return `<div class="doc">
+                    <div style="font-size:15px;font-weight:600">${e.name}</div>
+                    <div class="doc-meta">
+                        <span class="chip chip-green">${e.claim_count} claims</span>
+                        <span class="chip chip-link" onclick="filterClaimsByEntity('${e.name.replace(/'/g,"\\'")}')">View</span>
+                    </div>
+                    ${rels ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${rels}</div>` : ''}
+                </div>`;
+            }).join('');
+        }
+
+        function filterClaimsByEntity(entity) {
+            showKnowledgeTab('claims');
+            claimsVideoFilter = null;
+            document.getElementById('claims-filter-banner').style.display = 'flex';
+            document.getElementById('claims-filter-banner').innerHTML =
+                `<span>Entity: ${entity}</span><button onclick="clearClaimsFilter()">Clear</button>`;
+            renderClaims(allClaims.filter(c => c.entity === entity));
+        }
+
+        function filterKnowledge() {
+            const q = document.getElementById('knowledge-search').value.toLowerCase();
+            if (currentKTab === 'claims') {
+                const base = claimsVideoFilter ? allClaims.filter(c => c.video_id === claimsVideoFilter) : allClaims;
+                renderClaims(q ? base.filter(c => (c.text||'').toLowerCase().includes(q) || (c.entity||'').toLowerCase().includes(q)) : base);
+            } else if (currentKTab === 'entities') {
+                renderEntities(q ? allEntities.filter(e => (e.name||'').toLowerCase().includes(q)) : allEntities);
+            }
+        }
+
+        // ── Graph ──
+        function initGraph() {
+            if (!allEntities.length) return;
+            graphReady = true;
+            const nodes = [], edges = [], seen = new Set();
+
+            allEntities.forEach(e => {
+                if (!e.name) return;
+                nodes.push({ data: { id: e.name, label: e.name, size: Math.min(10 + e.claim_count * 3, 50) } });
+                seen.add(e.name);
+                (e.relationships || []).forEach(r => {
+                    if (r.target && !seen.has(r.target)) {
+                        nodes.push({ data: { id: r.target, label: r.target, size: 10 } });
+                        seen.add(r.target);
+                    }
+                    if (r.target) {
+                        edges.push({ data: { source: e.name, target: r.target, label: r.relation } });
+                    }
+                });
+            });
+
+            if (!nodes.length) {
+                document.getElementById('graph-info').textContent = 'No graph data yet. Process more videos to build connections.';
+                return;
+            }
+
+            const cy = cytoscape({
+                container: document.getElementById('graph-container'),
+                elements: { nodes, edges },
+                style: [
+                    { selector: 'node', style: {
+                        'background-color': '#007aff', 'label': 'data(label)',
+                        'font-size': '10px', 'color': '#333', 'text-valign': 'bottom',
+                        'text-margin-y': 6, 'width': 'data(size)', 'height': 'data(size)',
+                    }},
+                    { selector: 'edge', style: {
+                        'width': 1.5, 'line-color': '#c7c7cc', 'target-arrow-color': '#c7c7cc',
+                        'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
+                        'label': 'data(label)', 'font-size': '8px', 'color': '#8e8e93',
+                        'text-rotation': 'autorotate',
+                    }},
+                    { selector: ':selected', style: {
+                        'background-color': '#5856d6', 'border-width': 2, 'border-color': '#007aff',
+                    }},
+                ],
+                layout: { name: 'cose', animate: true, animationDuration: 500,
+                           nodeRepulsion: 8000, idealEdgeLength: 80 },
+                userZoomingEnabled: true, userPanningEnabled: true,
+            });
+
+            cy.on('tap', 'node', evt => {
+                const name = evt.target.id();
+                document.getElementById('graph-info').innerHTML =
+                    `<b>${name}</b> — ${(allEntities.find(e=>e.name===name)||{}).claim_count||0} claims ` +
+                    `<span class="chip chip-link chip-blue" onclick="filterClaimsByEntity('${name.replace(/'/g,"\\'")}')">View claims</span>`;
+            });
+        }
+
+        function exportVault() { window.open(`/api/export/obsidian?user_id=${userId}`, '_blank'); }
+
+        // ── Settings ──
         function saveKey(type) {
             const prefix = type === 'anthropic' ? 'sk-ant-' : 'sk_';
             const label = type === 'anthropic' ? 'Anthropic' : 'ElevenLabs';
@@ -393,7 +489,7 @@
         }
 
         function removeKey(type) {
-            if (!confirm('Remove ' + (type === 'anthropic' ? 'Anthropic' : 'ElevenLabs') + ' key?')) return;
+            if (!confirm('Remove ' + (type==='anthropic'?'Anthropic':'ElevenLabs') + ' key?')) return;
             fetch('/api/settings/apikey/delete', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({user_id: userId, key_type: type}),
@@ -403,91 +499,16 @@
             }).catch(() => showToast('Network error', 'error'));
         }
 
-        // Knowledge tab
-        let allClaims = [];
-        let allEntities = [];
-        let currentKTab = 'claims';
-
-        function showKnowledgeTab(tab) {
-            currentKTab = tab;
-            document.getElementById('claims-list').style.display = tab === 'claims' ? 'block' : 'none';
-            document.getElementById('entities-list').style.display = tab === 'entities' ? 'block' : 'none';
-            document.getElementById('nav-k-claims').classList.toggle('active', tab === 'claims');
-            document.getElementById('nav-k-entities').classList.toggle('active', tab === 'entities');
-        }
-
-        function loadKnowledge() {
-
-            fetch(`/api/claims?user_id=${userId}`).then(r => {
-                if (!r.ok) throw new Error('Auth failed');
-                return r.json();
-            }).then(claims => {
-                if (Array.isArray(claims)) { allClaims = claims; renderClaims(claims); }
-            }).catch(() => showToast('Failed to load claims', 'error'));
-
-            fetch(`/api/entities?user_id=${userId}`).then(r => {
-                if (!r.ok) throw new Error('Auth failed');
-                return r.json();
-            }).then(entities => {
-                if (Array.isArray(entities)) { allEntities = entities; renderEntities(entities); }
-            }).catch(() => showToast('Failed to load entities', 'error'));
-        }
-
-        function renderClaims(claims) {
-            const el = document.getElementById('claims-list');
-            if (!claims.length) {
-                el.innerHTML = '<div class="empty"><div class="icon">K</div><p>No claims yet.</p></div>';
-                return;
-            }
-            el.innerHTML = claims.map(c => {
-                const conf = Math.round((c.confidence || 0) * 100);
-                const color = conf >= 80 ? '#34c759' : conf >= 50 ? '#ff9500' : '#ff3b30';
-                return `<div class="doc">
-                    <div style="font-size:14px;line-height:1.4">${c.text}</div>
-                    <div class="claim-detail">
-                        <span><span class="conf-bar" style="width:${conf/3}px;background:${color}"></span>${conf}%</span>
-                        ${c.entity ? `<span>${c.entity}</span>` : ''}
-                        ${c.occurrences > 1 ? `<span class="chip chip-orange" style="font-size:10px">${c.occurrences}x</span>` : ''}
-                    </div>
-                </div>`;
-            }).join('');
-        }
-
-        function renderEntities(entities) {
-            const el = document.getElementById('entities-list');
-            if (!entities.length) {
-                el.innerHTML = '<div class="empty"><div class="icon">E</div><p>No entities yet.</p></div>';
-                return;
-            }
-            el.innerHTML = entities.map(e => {
-                const rels = (e.relationships || []).map(r => `${r.relation} ${r.target}`).join(', ');
-                return `<div class="doc">
-                    <div style="font-size:15px;font-weight:600">${e.name}</div>
-                    <div class="doc-meta"><span class="chip chip-green">${e.claim_count} claims</span></div>
-                    ${rels ? `<div class="entity-claims">${rels}</div>` : ''}
-                </div>`;
-            }).join('');
-        }
-
-        function filterKnowledge() {
-            const q = document.getElementById('knowledge-search').value.toLowerCase();
-            if (currentKTab === 'claims') {
-                renderClaims(q ? allClaims.filter(c => (c.text||'').toLowerCase().includes(q) || (c.entity||'').toLowerCase().includes(q)) : allClaims);
-            } else {
-                renderEntities(q ? allEntities.filter(e => (e.name||'').toLowerCase().includes(q)) : allEntities);
-            }
-        }
-
-        function exportVault() {
-            window.open(`/api/export/obsidian?user_id=${userId}`, '_blank');
-        }
-
-        // Hook: load knowledge data when tab is shown
-        const _origShowSection = showSection;
-        showSection = function(name) {
-            _origShowSection(name);
-            if (name === 'knowledge') loadKnowledge();
-        };
+        // ── Init ──
+        fetch(`/api/settings?user_id=${userId}`).then(r=>r.json()).then(data => {
+            document.getElementById('claim-count').textContent = data.claim_count || 0;
+            document.getElementById('video-count').textContent = data.video_count || 0;
+            updateKeyStatus('anthropic', data.has_anthropic_key);
+            updateKeyStatus('elevenlabs', data.has_elevenlabs_key);
+            if (!data.has_anthropic_key) showSection('settings');
+            else showSection('docs');
+        });
+        fetch(`/api/videos?user_id=${userId}`).then(r=>r.json()).then(v => { allDocs = v; renderDocs(v); });
     </script>
 </body>
 </html>
