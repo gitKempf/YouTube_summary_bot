@@ -27,7 +27,7 @@ def create_app(testing: bool = False) -> FastAPI:
                     if not init_data:
                         return JSONResponse({"detail": "Telegram authentication required"}, 401)
                     try:
-                        validate_init_data(init_data, BOT_TOKEN)
+                        validate_init_data(init_data, BOT_TOKEN, max_age=86400)
                     except TelegramAuthError as e:
                         return JSONResponse({"detail": str(e)}, 401)
                 return await call_next(request)

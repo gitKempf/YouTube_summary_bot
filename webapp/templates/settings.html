@@ -406,7 +406,6 @@
         // Knowledge tab
         let allClaims = [];
         let allEntities = [];
-        let knowledgeLoaded = false;
         let currentKTab = 'claims';
 
         function showKnowledgeTab(tab) {
@@ -418,17 +417,20 @@
         }
 
         function loadKnowledge() {
-            if (knowledgeLoaded) return;
-            knowledgeLoaded = true;
 
-            fetch(`/api/claims?user_id=${userId}`).then(r => r.json()).then(claims => {
-                allClaims = claims;
-                renderClaims(claims);
-            });
-            fetch(`/api/entities?user_id=${userId}`).then(r => r.json()).then(entities => {
-                allEntities = entities;
-                renderEntities(entities);
-            });
+            fetch(`/api/claims?user_id=${userId}`).then(r => {
+                if (!r.ok) throw new Error('Auth failed');
+                return r.json();
+            }).then(claims => {
+                if (Array.isArray(claims)) { allClaims = claims; renderClaims(claims); }
+            }).catch(() => showToast('Failed to load claims', 'error'));
+
+            fetch(`/api/entities?user_id=${userId}`).then(r => {
+                if (!r.ok) throw new Error('Auth failed');
+                return r.json();
+            }).then(entities => {
+                if (Array.isArray(entities)) { allEntities = entities; renderEntities(entities); }
+            }).catch(() => showToast('Failed to load entities', 'error'));
         }
 
         function renderClaims(claims) {
