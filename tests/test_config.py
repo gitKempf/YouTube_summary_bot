@@ -34,6 +34,14 @@ def test_config_raises_on_missing_key(monkeypatch):
         get_config()
 
 
+def test_config_anthropic_key_optional(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "e")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    config = get_config()
+    assert config.anthropic_api_key == ""
+
+
 def test_config_has_defaults(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-el-key")

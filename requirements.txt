@@ -5,6 +5,7 @@ elevenlabs
 anthropic
 edge-tts
 python-dotenv
+cryptography
 mem0ai
 langchain-neo4j
 rank-bm25

@@ -52,7 +52,11 @@ def rebuild_vault(user_id: str = "tg_120292793"):
         f"- [[Claims/]] — Extracted facts from videos\n"
         f"- [[Entities/]] — People, tools, concepts\n"
         f"- [[Transcripts/]] — Full video transcripts\n\n"
-        f"Use the **Graph View** (top right) to explore connections.\n"
+        f"Use the **Graph View** (top right) to explore connections.\n\n"
+        f'<a href="/api/export/obsidian?user_id={user_id}" '
+        f'style="display:inline-block;padding:10px 20px;background:#2481cc;color:#fff;'
+        f'border-radius:8px;text-decoration:none;font-weight:600">'
+        f'Download Obsidian Vault (ZIP)</a>\n'
     )
 
     logger.info(f"Vault exported: {len(claims)} claims, {len(entities)} entities, {len(transcripts)} transcripts")

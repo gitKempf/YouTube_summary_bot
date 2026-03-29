@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from src.tts import generate_voice, generate_voice_chunked, TTSError, get_voice_for_language, convert_to_ogg, strip_markdown, split_text_chunks
+from src.tts import generate_voice, generate_voice_chunked, TTSError, get_voice_for_language, detect_language_from_text, convert_to_ogg, strip_markdown, split_text_chunks
 
 
 def _mock_stream(*audio_chunks):
@@ -41,6 +41,55 @@ class TestGetVoiceForLanguage:
 
     def test_unknown_falls_back_to_english(self):
         assert get_voice_for_language("xx") == "en-US-RogerNeural"
+
+
+class TestDetectLanguageFromText:
+    def test_english_text(self):
+        text = "This is a perfectly normal English sentence about technology and AI models."
+        assert detect_language_from_text(text) == "en"
+
+    def test_russian_text(self):
+        text = (
+            "Главный вывод простой: за каждым великим продуктом стоит не один "
+            "человек, а пара — тот, кто мечтает, и тот, кто строит. "
+            "В случае Telegram второй — это математический гений из Санкт-Петербурга, "
+            "о котором почти никто не говорит."
+        )
+        assert detect_language_from_text(text) == "ru"
+
+    def test_chinese_text(self):
+        text = "人工智能正在改变世界。这项技术的发展速度令人惊叹，每天都有新的突破。"
+        assert detect_language_from_text(text) == "zh"
+
+    def test_japanese_text(self):
+        text = "これは日本語のテストです。人工知能はとても興味深い技術です。毎日新しい発見があります。"
+        assert detect_language_from_text(text) == "ja"
+
+    def test_korean_text(self):
+        text = "인공지능은 세상을 변화시키고 있습니다. 이 기술의 발전 속도는 놀랍습니다. 매일 새로운 발견이 있습니다."
+        assert detect_language_from_text(text) == "ko"
+
+    def test_arabic_text(self):
+        text = "الذكاء الاصطناعي يغير العالم. سرعة تطور هذه التكنولوجيا مذهلة. كل يوم هناك اكتشافات جديدة."
+        assert detect_language_from_text(text) == "ar"
+
+    def test_hindi_text(self):
+        text = "कृत्रिम बुद्धिमत्ता दुनिया को बदल रही है। इस तकनीक की विकास गति आश्चर्यजनक है। हर दिन नई खोजें होती हैं।"
+        assert detect_language_from_text(text) == "hi"
+
+    def test_mixed_english_with_few_cyrillic_stays_english(self):
+        text = "This is English text with a mention of Дуров but mostly in English language."
+        assert detect_language_from_text(text) == "en"
+
+    def test_empty_text_defaults_to_english(self):
+        assert detect_language_from_text("") == "en"
+
+    def test_end_to_end_voice_selection(self):
+        """Russian text should map to Russian voice via detect → get_voice chain."""
+        russian = "Это тестовый текст на русском языке для проверки распознавания."
+        lang = detect_language_from_text(russian)
+        voice = get_voice_for_language(lang)
+        assert voice == "ru-RU-DmitryNeural"
 
 
 class TestStripMarkdown:

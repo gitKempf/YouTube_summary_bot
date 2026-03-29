@@ -14,12 +14,12 @@ from telegram.ext import (
 )
 
 from src.config import get_config
-from src.downloader import download_audio, extract_video_id, fetch_transcript
+from src.downloader import download_audio, extract_video_id, fetch_transcript, fetch_video_title
 from src.fact_checker import extract_claims, classify_claims, build_context_prompt
 from src.memory import MemoryManager
 from src.transcriber import transcribe_audio, TranscriptionError
 from src.summarizer import summarize_text, SummarizationError
-from src.tts import generate_voice_chunked, get_voice_for_language, TTSError
+from src.tts import generate_voice_chunked, get_voice_for_language, detect_language_from_text, TTSError
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,11 @@ WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://localhost:8000")
 
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 PROGRESS_BAR_WIDTH = 15
+
+
+def _escape_html(text: str) -> str:
+    """Escape HTML special characters for Telegram HTML parse mode."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _progress_bar(percent: float, label: str) -> str:
@@ -147,13 +152,110 @@ async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show current settings and allow configuration."""
+    if not await _check_access(update, context):
+        return
+
+    memory_mgr = context.bot_data.get("memory_mgr")
+    user_mem_id = f"tg_{update.effective_user.id}"
+
+    lines = ["*Settings*\n"]
+
+    if memory_mgr:
+        settings = await memory_mgr.get_user_settings(user_mem_id)
+        has_ant = bool(settings.get("anthropic_api_key"))
+        has_el = bool(settings.get("elevenlabs_api_key"))
+        lines.append(f"Anthropic API key: {'configured' if has_ant else 'not set'}")
+        lines.append(f"ElevenLabs API key: {'configured' if has_el else 'not set'}")
+        if not has_ant or not has_el:
+            lines.append("\n*You must set both API keys to use the bot.*")
+    else:
+        lines.append("Memory system disabled — settings unavailable.")
+
+    lines.append("\nUse /dashboard to configure API keys.")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def setkey_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set per-user API key. Detects type from prefix."""
+    if not await _check_access(update, context):
+        return
+
+    memory_mgr = context.bot_data.get("memory_mgr")
+    if not memory_mgr:
+        await update.message.reply_text("Memory system is disabled. Cannot store settings.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage:\n"
+            "`/setkey sk-ant-...` — Anthropic key\n"
+            "`/setkey sk_...` — ElevenLabs key",
+            parse_mode="Markdown",
+        )
+        return
+
+    key = args[0]
+    user_mem_id = f"tg_{update.effective_user.id}"
+
+    if key.startswith("sk-ant-"):
+        await memory_mgr.save_user_settings(user_mem_id, {"anthropic_api_key": key})
+        key_type = "Anthropic"
+    elif key.startswith("sk_"):
+        await memory_mgr.save_user_settings(user_mem_id, {"elevenlabs_api_key": key})
+        key_type = "ElevenLabs"
+    else:
+        await update.message.reply_text(
+            "Unrecognized key format.\n"
+            "Anthropic keys start with `sk-ant-`, ElevenLabs with `sk_`."
+        )
+        return
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=f"{key_type} API key saved. Your message was deleted for security.",
+    )
+
+
+async def removekey_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove per-user API keys."""
+    if not await _check_access(update, context):
+        return
+
+    memory_mgr = context.bot_data.get("memory_mgr")
+    if not memory_mgr:
+        await update.message.reply_text("Memory system is disabled.")
+        return
+
+    user_mem_id = f"tg_{update.effective_user.id}"
+    await memory_mgr.save_user_settings(
+        user_mem_id, {"anthropic_api_key": "", "elevenlabs_api_key": ""}
+    )
+    await update.message.reply_text(
+        "All API keys have been removed. "
+        "You'll need to set new ones to continue using the bot."
+    )
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _check_access(update, context):
         return
     await update.message.reply_text(
         "Welcome! Send me a YouTube video link and I'll create a summary for you.\n"
         "You'll receive both a text summary and a voice message.\n\n"
-        "Use /dashboard to view your knowledge base."
+        "Commands:\n"
+        "/dashboard — View your knowledge base\n"
+        "/settings — View and configure settings\n"
+        "/setkey — Set your own Anthropic API key\n"
+        "/removekey — Remove your API key"
     )
 
 
@@ -164,6 +266,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = get_config()
     audio_path = None
     voice_paths: List[Path] = []
+
+    # Resolve per-user API keys (required)
+    memory_mgr = context.bot_data.get("memory_mgr")
+    user_mem_id = f"tg_{update.effective_user.id}"
+    api_key = None
+    elevenlabs_key = None
+    if memory_mgr:
+        try:
+            user_settings = await memory_mgr.get_user_settings(user_mem_id)
+            api_key = user_settings.get("anthropic_api_key", "") or None
+            elevenlabs_key = user_settings.get("elevenlabs_api_key", "") or None
+        except Exception:
+            pass
+
+    missing_keys = []
+    if not api_key:
+        missing_keys.append("Anthropic")
+    if not elevenlabs_key:
+        missing_keys.append("ElevenLabs")
+
+    if missing_keys:
+        await update.message.reply_text(
+            f"You need to set your {' and '.join(missing_keys)} API "
+            f"key{'s' if len(missing_keys) > 1 else ''} before using the bot.\n\n"
+            "Tap the button below to configure.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("Configure API Keys", web_app=WebAppInfo(url=WEBAPP_URL)),
+            ]]),
+        )
+        return
 
     try:
         video_id = extract_video_id(url)
@@ -177,9 +309,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await progress.update(2, "Fetching transcript...")
         transcript_result = await asyncio.to_thread(fetch_transcript, video_id)
 
+        has_captions = False
         if transcript_result:
             transcript_text = transcript_result.text
             language_code = transcript_result.language_code
+            has_captions = True
             logger.info(f"Got transcript from YouTube captions ({language_code})")
             await progress.update(10, "Transcript fetched")
         else:
@@ -190,7 +324,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await progress.update(15, "Audio downloaded. Transcribing...")
 
             transcription = await asyncio.to_thread(
-                transcribe_audio, audio_path, config.elevenlabs_api_key
+                transcribe_audio, audio_path, elevenlabs_key
             )
             transcript_text = transcription.text
             language_code = transcription.language_code
@@ -199,8 +333,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Step 2: Memory — fact check & retrieve context (10% -> 20%)
         past_context = None
         fact_check_result = None
-        memory_mgr = context.bot_data.get("memory_mgr")
-        user_mem_id = f"tg_{update.effective_user.id}"
+
+        # Fetch video title for display
+        video_title = fetch_video_title(video_id)
 
         # Store transcript in separate collection
         if config.memory_enabled and memory_mgr:
@@ -208,6 +343,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await memory_mgr.store_transcript(
                     video_id=video_id, user_id=user_mem_id,
                     transcript=transcript_text, language_code=language_code,
+                    title=video_title,
                 )
             except Exception as e:
                 logger.warning(f"Failed to store transcript: {e}")
@@ -217,7 +353,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await progress.update(12, "Analyzing topics...")
                 logger.info(f"[MEMORY] Extracting claims for user {user_mem_id}")
                 claims = await extract_claims(
-                    transcript_text, config.anthropic_api_key, config.claude_model,
+                    transcript_text, api_key, config.claude_model,
                     video_id=video_id,
                 )
                 logger.info(f"[MEMORY] Extracted {len(claims)} claims")
@@ -234,7 +370,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 await progress.update(18, "Checking what's new...")
                 fact_check_result = await classify_claims(
-                    claims, memories, config.anthropic_api_key, config.claude_model
+                    claims, memories, api_key, config.claude_model
                 )
                 logger.info(
                     f"[MEMORY] Classification: {len(fact_check_result.new_claims)} new, "
@@ -256,7 +392,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await progress.update(22, "Generating summary with Claude...")
         summary = await summarize_text(
             transcript_text,
-            config.anthropic_api_key,
+            api_key,
             model=config.claude_model,
             max_tokens=config.max_tokens,
             past_context=past_context,
@@ -266,7 +402,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Step 3: Generate voice (50% -> 95%)
         await progress.update(52, "Creating voice message...")
         try:
-            voice = get_voice_for_language(language_code)
+            # Use caption language if available, otherwise detect from summary text
+            if has_captions:
+                tts_lang = language_code
+            else:
+                tts_lang = detect_language_from_text(summary)
+                logger.info(f"TTS: detected language '{tts_lang}' from summary text (no captions)")
+            voice = get_voice_for_language(tts_lang)
 
             async def on_voice_progress(fraction: float, _total: float):
                 pct = 52 + int(43 * fraction)
@@ -283,43 +425,73 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if config.memory_enabled and fact_check_result and memory_mgr:
             try:
                 await progress.update(96, "Saving to memory...")
-                stored = 0
-                skipped = 0
+
+                # Deduplicate claims within this batch to prevent races
+                seen_texts = set()
+                unique_claims = []
                 for cc in fact_check_result.new_claims:
-                    claim = cc.claim
-                    meta = {
-                        "entity": claim.entity,
-                        "relation": claim.relation,
-                        "value": claim.value,
-                        "confidence": claim.confidence,
-                        "video_id": claim.video_id,
-                        "timestamp": claim.timestamp,
-                    }
-                    was_new = await memory_mgr.add_if_new(
-                        claim.text, user_id=user_mem_id, metadata=meta
-                    )
-                    if was_new:
-                        stored += 1
-                    else:
-                        skipped += 1
+                    if cc.claim.text not in seen_texts:
+                        seen_texts.add(cc.claim.text)
+                        unique_claims.append(cc)
+
+                sem = asyncio.Semaphore(5)
+
+                async def _store_claim(cc):
+                    async with sem:
+                        claim = cc.claim
+                        meta = {
+                            "entity": claim.entity,
+                            "relation": claim.relation,
+                            "value": claim.value,
+                            "confidence": claim.confidence,
+                            "video_id": claim.video_id,
+                            "timestamp": claim.timestamp,
+                        }
+                        return await memory_mgr.add_if_new(
+                            claim.text, user_id=user_mem_id, metadata=meta
+                        )
+
+                results = await asyncio.gather(
+                    *[_store_claim(cc) for cc in unique_claims],
+                    return_exceptions=True,
+                )
+                stored = sum(1 for r in results if r is True)
+                skipped = sum(1 for r in results if r is False)
+                errors = sum(1 for r in results if isinstance(r, Exception))
                 logger.info(
-                    f"[MEMORY] Stored {stored} new, skipped {skipped} duplicates for {user_mem_id}"
+                    f"[MEMORY] Stored {stored} new, skipped {skipped} duplicates"
+                    f"{f', {errors} errors' if errors else ''} for {user_mem_id}"
                 )
             except Exception as e:
                 logger.warning(f"Failed to store memories: {e}", exc_info=True)
 
-        # Step 5: Done
+        # Step 5: Rebuild vault (97% -> 99%)
+        if config.memory_enabled and fact_check_result and memory_mgr and stored > 0:
+            try:
+                await progress.update(97, "Updating knowledge vault...")
+                from webapp.build_vault import rebuild_vault
+                await asyncio.to_thread(rebuild_vault, user_mem_id)
+            except Exception as e:
+                logger.warning(f"Vault rebuild failed (non-critical): {e}")
+
+        # Step 6: Done
         await progress.update(100, "Done!")
 
-        # Send text
-        message_parts = split_message(summary)
-        for part in message_parts:
-            await update.message.reply_text(part)
-
-        # Send voice
+        # Send voice with caption (title + link)
+        video_url = f"https://youtube.com/watch?v={video_id}"
+        caption_title = video_title or video_id
+        caption = f'<b>{_escape_html(caption_title)}</b>\n{video_url}'
         for vp in voice_paths:
             with open(vp, "rb") as voice_file:
-                await update.message.reply_voice(voice=voice_file)
+                await update.message.reply_voice(
+                    voice=voice_file, caption=caption, parse_mode="HTML",
+                )
+
+        # Send summary in expandable blockquote
+        summary_parts = split_message(summary)
+        for part in summary_parts:
+            html = f'<blockquote expandable>{_escape_html(part)}</blockquote>'
+            await update.message.reply_text(html, parse_mode="HTML")
 
     except (ValueError, TranscriptionError, SummarizationError) as e:
         error_messages = {
@@ -365,6 +537,9 @@ def create_app():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("id", id_command))
     app.add_handler(CommandHandler("dashboard", dashboard_command))
+    app.add_handler(CommandHandler("settings", settings_command))
+    app.add_handler(CommandHandler("setkey", setkey_command))
+    app.add_handler(CommandHandler("removekey", removekey_command))
     app.add_handler(
         MessageHandler(
             filters.TEXT

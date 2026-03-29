@@ -2,15 +2,17 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps
+# System deps + Node 22 (required by Quartz)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl git nodejs npm \
+    curl git \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir fastapi uvicorn jinja2 sentence-transformers langchain-neo4j rank-bm25
+    && pip install --no-cache-dir sentence-transformers langchain-neo4j rank-bm25
 
 # Copy app
 COPY src/ src/
@@ -20,6 +22,11 @@ COPY export_obsidian.py .
 # Install Quartz
 RUN git clone --depth 1 https://github.com/jackyzha0/quartz.git webapp/quartz \
     && cd webapp/quartz && npm i
+
+# Apply production quartz config if present
+COPY webapp/quartz.config.production.ts /tmp/quartz.config.production.ts
+RUN if [ -f /tmp/quartz.config.production.ts ]; then \
+    cp /tmp/quartz.config.production.ts webapp/quartz/quartz.config.ts; fi
 
 ENV KMP_DUPLICATE_LIB_OK=TRUE
 ENV PYTHONUNBUFFERED=1

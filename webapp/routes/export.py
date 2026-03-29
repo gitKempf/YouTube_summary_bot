@@ -13,7 +13,11 @@ def build_vault_zip(user_id: str) -> bytes:
     """Build Obsidian vault and return as ZIP bytes."""
     from qdrant_client import QdrantClient, models
 
-    qdrant = QdrantClient(host="localhost", port=6333)
+    import os
+    qdrant = QdrantClient(
+        host=os.environ.get("MEM0_QDRANT_HOST", "localhost"),
+        port=int(os.environ.get("MEM0_QDRANT_PORT", "6333")),
+    )
 
     # Use existing export logic
     from export_obsidian import fetch_claims, fetch_transcripts, fetch_entities

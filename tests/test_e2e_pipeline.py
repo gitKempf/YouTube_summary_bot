@@ -25,20 +25,29 @@ def pipeline_config():
     c = MagicMock()
     c.memory_enabled = True
     c.is_user_allowed.return_value = True
-    c.anthropic_api_key = "fake"
+    c.anthropic_api_key = ""
     c.claude_model = "claude-sonnet-4-6"
     c.max_tokens = 4096
     return c
 
 
-@pytest.fixture
-def pipeline_mgr():
+def _pipeline_mgr_mock(**overrides):
     m = MagicMock()
+    m.get_user_settings = AsyncMock(
+        return_value={"anthropic_api_key": "fake-user-key", "elevenlabs_api_key": "fake-el-key"}
+    )
     m.search = AsyncMock(return_value=[])
     m.add = AsyncMock()
     m.add_if_new = AsyncMock(return_value=True)
     m.store_transcript = AsyncMock()
+    for k, v in overrides.items():
+        setattr(m, k, v)
     return m
+
+
+@pytest.fixture
+def pipeline_mgr():
+    return _pipeline_mgr_mock()
 
 
 class TestE2EPipelineVideoOne:
@@ -118,13 +127,12 @@ class TestE2EPipelineVideoTwo:
         self, mock_status_msg, pipeline_config
     ):
         # Memory manager returns prior knowledge from video 1
-        mgr = MagicMock()
-        mgr.search = AsyncMock(return_value=[
-            MemoryEntry(id="m1", text="AI agents need structured memory", score=0.9,
-                        metadata={"entity": "AI agents", "confidence": 0.9}),
-        ])
-        mgr.add_if_new = AsyncMock(return_value=True)
-        mgr.store_transcript = AsyncMock()
+        mgr = _pipeline_mgr_mock(
+            search=AsyncMock(return_value=[
+                MemoryEntry(id="m1", text="AI agents need structured memory", score=0.9,
+                            metadata={"entity": "AI agents", "confidence": 0.9}),
+            ]),
+        )
 
         update = MagicMock()
         update.message = MagicMock()
@@ -194,8 +202,9 @@ class TestE2EPipelineGracefulDegradation:
 
     @pytest.mark.asyncio
     async def test_memory_crash_still_produces_summary(self, mock_status_msg, pipeline_config):
-        mgr = MagicMock()
-        mgr.search = AsyncMock(side_effect=Exception("Qdrant down"))
+        mgr = _pipeline_mgr_mock(
+            search=AsyncMock(side_effect=Exception("Qdrant down")),
+        )
 
         update = MagicMock()
         update.message = MagicMock()

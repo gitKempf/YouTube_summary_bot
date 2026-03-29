@@ -5,7 +5,9 @@ from typing import Dict, List, Optional
 
 
 def _sanitize_filename(name: str) -> str:
-    return re.sub(r'[<>:"/\\|?*]', '_', name)[:100]
+    name = re.sub(r'[<>:"/\\|?*]', '_', name)
+    name = name.rstrip('. ')  # trailing dots/spaces break URL routing
+    return name[:100]
 
 
 class ObsidianExporter:

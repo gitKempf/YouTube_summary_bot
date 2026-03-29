@@ -10,15 +10,32 @@ from src.tts import TTSError
 from src.fact_checker import Claim, ClassifiedClaim, ClaimStatus, FactCheckResult
 
 
+def _make_memory_mgr_mock(**overrides):
+    """Create a minimal MemoryManager mock that returns per-user API keys."""
+    mgr = MagicMock()
+    mgr.get_user_settings = AsyncMock(
+        return_value={"anthropic_api_key": "fake-user-key", "elevenlabs_api_key": "fake-el-key"}
+    )
+    mgr.save_user_settings = AsyncMock()
+    mgr.search = AsyncMock(return_value=[])
+    mgr.add = AsyncMock()
+    mgr.add_if_new = AsyncMock(return_value=True)
+    mgr.store_transcript = AsyncMock()
+    for k, v in overrides.items():
+        setattr(mgr, k, v)
+    return mgr
+
+
 @pytest.fixture
 def mock_config():
     config = MagicMock()
     config.telegram_bot_token = "fake-token"
     config.elevenlabs_api_key = "fake-el-key"
-    config.anthropic_api_key = "fake-ant-key"
+    config.anthropic_api_key = ""
     config.tts_voice = "en-US-RogerNeural"
     config.claude_model = "claude-sonnet-4-6"
     config.max_tokens = 4096
+    config.memory_enabled = False
     config.is_user_allowed.return_value = True
     return config
 
@@ -33,11 +50,13 @@ def mock_status_msg():
 def _happy_patches(mock_config, transcript=None, summary="Summary"):
     if transcript is None:
         transcript = TranscriptFetchResult(text="Transcript", language_code="en")
+
     return {
         "config": patch("src.bot.get_config", return_value=mock_config),
         "vid": patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"),
         "thread": patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                         return_value=transcript),
+        "title": patch("src.bot.fetch_video_title", return_value="Test Video"),
         "sum": patch("src.bot.summarize_text", new_callable=AsyncMock,
                      return_value=summary),
         "voice": patch("src.bot.get_voice_for_language",
@@ -180,7 +199,7 @@ class TestHandleMessageWithCaptions:
     async def test_progress_bar_updates(self, mock_update, mock_context, mock_config, mock_status_msg):
         mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
         p = _happy_patches(mock_config)
-        with p["config"], p["vid"], p["thread"], p["sum"], p["voice"], \
+        with p["config"], p["vid"], p["thread"], p["title"], p["sum"], p["voice"], \
              p["tts"], p["open"], p["exists"], p["unlink"]:
             await handle_message(mock_update, mock_context)
         # Should have multiple progress edits (start, transcript, summarize, voice, done)
@@ -191,17 +210,17 @@ class TestHandleMessageWithCaptions:
         mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
         p = _happy_patches(mock_config,
                            TranscriptFetchResult(text="Caption text", language_code="en"))
-        with p["config"], p["vid"], p["thread"] as mt, p["sum"] as ms, \
+        with p["config"], p["vid"], p["thread"] as mt, p["title"], p["sum"] as ms, \
              p["voice"], p["tts"], p["open"], p["exists"], p["unlink"]:
             await handle_message(mock_update, mock_context)
-        assert mt.call_count == 1
+        assert mt.call_count == 1  # fetch_transcript only (title fetched directly)
         assert "Caption text" in str(ms.call_args)
 
     @pytest.mark.asyncio
     async def test_sends_summary_and_voice(self, mock_update, mock_context, mock_config, mock_status_msg):
         mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
         p = _happy_patches(mock_config, summary="My summary")
-        with p["config"], p["vid"], p["thread"], p["sum"], p["voice"], \
+        with p["config"], p["vid"], p["thread"], p["title"], p["sum"], p["voice"], \
              p["tts"], p["open"], p["exists"], p["unlink"]:
             await handle_message(mock_update, mock_context)
         calls = mock_update.message.reply_text.call_args_list
@@ -209,11 +228,12 @@ class TestHandleMessageWithCaptions:
         mock_update.message.reply_voice.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_tts_with_detected_language(self, mock_update, mock_context, mock_config, mock_status_msg):
+    async def test_tts_uses_caption_language_when_available(self, mock_update, mock_context, mock_config, mock_status_msg):
+        """When captions exist, TTS uses the caption language code."""
         mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
         p = _happy_patches(mock_config,
-                           TranscriptFetchResult(text="Bonjour", language_code="fr"))
-        with p["config"], p["vid"], p["thread"], p["sum"], \
+                           TranscriptFetchResult(text="Bonjour le monde", language_code="fr"))
+        with p["config"], p["vid"], p["thread"], p["title"], p["sum"], \
              patch("src.bot.get_voice_for_language", return_value="fr-FR-HenriNeural") as gv, \
              p["tts"], p["open"], p["exists"], p["unlink"]:
             await handle_message(mock_update, mock_context)
@@ -228,7 +248,8 @@ class TestHandleMessageFallback:
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    side_effect=[None, Path("/tmp/a.mp4"),
-                                TranscriptionResult(text="EL text", language_code="en")]) as mt, \
+                                TranscriptionResult(text="EL text", language_code="en"),
+                                "Fallback Video"]) as mt, \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="S") as ms, \
              patch("src.bot.get_voice_for_language", return_value="en-US-RogerNeural"), \
              patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
@@ -237,7 +258,7 @@ class TestHandleMessageFallback:
              patch("src.bot.Path.exists", return_value=False), \
              patch("src.bot.Path.unlink"):
             await handle_message(mock_update, mock_context)
-        assert mt.call_count == 3
+        assert mt.call_count == 3  # fetch_transcript + download + transcribe
         assert "EL text" in str(ms.call_args)
 
 
@@ -261,6 +282,7 @@ class TestHandleMessageErrors:
              patch("src.bot.extract_video_id", return_value="dQw4w9WgXcQ"), \
              patch("src.bot.asyncio.to_thread", new_callable=AsyncMock,
                    return_value=TranscriptFetchResult(text="T", language_code="en")), \
+             patch("src.bot.fetch_video_title", return_value="T"), \
              patch("src.bot.summarize_text", new_callable=AsyncMock, return_value="Summary"), \
              patch("src.bot.get_voice_for_language", return_value="en-US-RogerNeural"), \
              patch("src.bot.generate_voice_chunked", new_callable=AsyncMock,
@@ -290,18 +312,13 @@ class TestMemoryIntegration:
         c = MagicMock()
         c.memory_enabled = True
         c.is_user_allowed.return_value = True
-        c.anthropic_api_key = "fake"
+        c.anthropic_api_key = ""
         c.claude_model = "claude-sonnet-4-6"
         c.max_tokens = 4096
         return c
 
     def _mem_mgr(self):
-        m = MagicMock()
-        m.search = AsyncMock(return_value=[])
-        m.add = AsyncMock()
-        m.add_if_new = AsyncMock(return_value=True)
-        m.store_transcript = AsyncMock()
-        return m
+        return _make_memory_mgr_mock()
 
     @pytest.mark.asyncio
     async def test_pipeline_uses_memory_when_enabled(self, mock_update, mock_context, mock_status_msg):
@@ -340,10 +357,9 @@ class TestMemoryIntegration:
     @pytest.mark.asyncio
     async def test_pipeline_skips_memory_when_disabled(self, mock_update, mock_context, mock_config, mock_status_msg):
         mock_config.memory_enabled = False
-        mock_context.bot_data = {}
         mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
         p = _happy_patches(mock_config)
-        with p["config"], p["vid"], p["thread"], p["sum"] as mock_sum, p["voice"], \
+        with p["config"], p["vid"], p["thread"], p["title"], p["sum"] as mock_sum, p["voice"], \
              p["tts"], p["open"], p["exists"], p["unlink"]:
             await handle_message(mock_update, mock_context)
         assert mock_sum.call_args[1].get("past_context") is None
@@ -440,3 +456,37 @@ class TestMemoryIntegration:
 
         search_uid = mgr.search.call_args[1]["user_id"]
         assert search_uid == "tg_99999"
+
+
+class TestApiKeyRequired:
+    @pytest.mark.asyncio
+    async def test_no_key_rejects_with_message(self, mock_update, mock_context, mock_config, mock_status_msg):
+        """User without API key gets a rejection message, not a summary."""
+        no_key_mgr = _make_memory_mgr_mock()
+        no_key_mgr.get_user_settings = AsyncMock(return_value={})
+        mock_context.bot_data = {"memory_mgr": no_key_mgr}
+        mock_update.message.reply_text = AsyncMock()
+        with patch("src.bot.get_config", return_value=mock_config):
+            await handle_message(mock_update, mock_context)
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "API key" in call_text
+
+    @pytest.mark.asyncio
+    async def test_no_memory_mgr_rejects(self, mock_update, mock_context, mock_config, mock_status_msg):
+        """No memory manager means no way to look up key — reject."""
+        mock_context.bot_data = {}
+        mock_update.message.reply_text = AsyncMock()
+        with patch("src.bot.get_config", return_value=mock_config):
+            await handle_message(mock_update, mock_context)
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "API key" in call_text
+
+    @pytest.mark.asyncio
+    async def test_with_key_proceeds(self, mock_update, mock_context, mock_config, mock_status_msg):
+        """User with API key configured should proceed normally."""
+        mock_update.message.reply_text = AsyncMock(side_effect=[mock_status_msg, None])
+        p = _happy_patches(mock_config)
+        with p["config"], p["vid"], p["thread"], p["title"], p["sum"] as mock_sum, p["voice"], \
+             p["tts"], p["open"], p["exists"], p["unlink"]:
+            await handle_message(mock_update, mock_context)
+        mock_sum.assert_awaited_once()

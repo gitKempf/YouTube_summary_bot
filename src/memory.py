@@ -1,18 +1,65 @@
 import asyncio
+import base64
 import hashlib
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+from cryptography.fernet import Fernet, InvalidToken
 from mem0 import Memory
 from qdrant_client import QdrantClient, models
 
 from src.config import Config
 
 TRANSCRIPT_COLLECTION = "youtube_bot_transcripts"
+USER_SETTINGS_COLLECTION = "youtube_bot_user_settings"
+_ENCRYPTED_FIELDS = {"anthropic_api_key", "elevenlabs_api_key"}
 
 logger = logging.getLogger(__name__)
+
+
+def _get_fernet() -> Fernet:
+    """Derive a Fernet key from SETTINGS_SECRET env var."""
+    secret = os.environ.get("SETTINGS_SECRET", "")
+    if not secret:
+        raise RuntimeError("SETTINGS_SECRET env var is required for key encryption")
+    # Derive a 32-byte key from the secret via SHA-256, then base64-encode for Fernet
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest())
+    return Fernet(key)
+
+
+def _encrypt_settings(settings: Dict) -> Dict:
+    """Encrypt sensitive fields in settings dict."""
+    try:
+        f = _get_fernet()
+    except RuntimeError:
+        return settings
+    out = dict(settings)
+    for field in _ENCRYPTED_FIELDS:
+        val = out.get(field, "")
+        if val and not val.startswith("gAAAAA"):  # already encrypted
+            out[field] = f.encrypt(val.encode()).decode()
+    return out
+
+
+def _decrypt_settings(settings: Dict) -> Dict:
+    """Decrypt sensitive fields in settings dict."""
+    try:
+        f = _get_fernet()
+    except RuntimeError:
+        return settings
+    out = dict(settings)
+    for field in _ENCRYPTED_FIELDS:
+        val = out.get(field, "")
+        if val and val.startswith("gAAAAA"):
+            try:
+                out[field] = f.decrypt(val.encode()).decode()
+            except InvalidToken:
+                logger.warning(f"Failed to decrypt {field}, clearing it")
+                out[field] = ""
+    return out
 
 
 def _patch_mem0_anthropic_tool_choice():
@@ -118,9 +165,10 @@ class MemoryManager:
 
         self._memory = Memory.from_config(config_dict=mem0_config)
 
-        # Separate Qdrant client for transcript storage
+        # Separate Qdrant client for transcript and settings storage
         self._qdrant = QdrantClient(host=config.qdrant_host, port=config.qdrant_port)
         self._ensure_transcript_collection()
+        self._ensure_settings_collection()
 
     def _ensure_transcript_collection(self):
         try:
@@ -134,8 +182,62 @@ class MemoryManager:
         except Exception as e:
             logger.warning(f"Could not create transcript collection: {e}")
 
+    def _ensure_settings_collection(self):
+        try:
+            collections = [c.name for c in self._qdrant.get_collections().collections]
+            if USER_SETTINGS_COLLECTION not in collections:
+                self._qdrant.create_collection(
+                    collection_name=USER_SETTINGS_COLLECTION,
+                    vectors_config=models.VectorParams(size=1, distance=models.Distance.COSINE),
+                )
+                logger.info(f"Created collection {USER_SETTINGS_COLLECTION}")
+        except Exception as e:
+            logger.warning(f"Could not create settings collection: {e}")
+
+    async def get_user_settings(self, user_id: str) -> Dict:
+        try:
+            point_id = hashlib.md5(f"settings:{user_id}".encode()).hexdigest()
+            points = await asyncio.to_thread(
+                self._qdrant.retrieve,
+                collection_name=USER_SETTINGS_COLLECTION,
+                ids=[point_id],
+                with_payload=True,
+            )
+            if points:
+                return _decrypt_settings(points[0].payload)
+            return {}
+        except Exception as e:
+            logger.warning(f"Failed to get user settings: {e}")
+            return {}
+
+    async def save_user_settings(self, user_id: str, settings: Dict) -> None:
+        try:
+            point_id = hashlib.md5(f"settings:{user_id}".encode()).hexdigest()
+            # Merge with existing (decrypted) settings
+            existing = await self.get_user_settings(user_id)
+            existing.update(settings)
+            existing["user_id"] = user_id
+            existing["updated_at"] = datetime.now(timezone.utc).isoformat()
+            # Encrypt before storing
+            encrypted = _encrypt_settings(existing)
+            await asyncio.to_thread(
+                self._qdrant.upsert,
+                collection_name=USER_SETTINGS_COLLECTION,
+                points=[
+                    models.PointStruct(
+                        id=point_id,
+                        vector=[0.0],
+                        payload=encrypted,
+                    )
+                ],
+            )
+            logger.info(f"[SETTINGS] Saved settings for {user_id}")
+        except Exception as e:
+            logger.warning(f"Failed to save user settings: {e}")
+
     async def store_transcript(
-        self, video_id: str, user_id: str, transcript: str, language_code: str = "en"
+        self, video_id: str, user_id: str, transcript: str,
+        language_code: str = "en", title: str = "",
     ) -> None:
         try:
             existing = await self.get_transcript(video_id=video_id, user_id=user_id)
@@ -156,6 +258,7 @@ class MemoryManager:
                             "user_id": user_id,
                             "transcript": transcript,
                             "language_code": language_code,
+                            "title": title,
                             "stored_at": datetime.now(timezone.utc).isoformat(),
                         },
                     )

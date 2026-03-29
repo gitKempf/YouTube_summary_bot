@@ -59,6 +59,34 @@ def get_voice_for_language(language_code: str) -> str:
     return VOICE_MAP.get(language_code, "en-US-RogerNeural")
 
 
+# Unicode ranges for non-Latin script detection
+_SCRIPT_LANG_MAP = [
+    (r'[\u0400-\u04FF]', 'ru'),   # Cyrillic → Russian
+    (r'[\u0600-\u06FF]', 'ar'),   # Arabic
+    (r'[\u3040-\u309F\u30A0-\u30FF]', 'ja'),  # Japanese
+    (r'[\uAC00-\uD7AF]', 'ko'),  # Korean
+    (r'[\u4E00-\u9FFF]', 'zh'),   # Chinese
+    (r'[\u0900-\u097F]', 'hi'),   # Devanagari → Hindi
+    (r'[\u0E00-\u0E7F]', 'th'),   # Thai
+]
+
+import re as _re
+
+def detect_language_from_text(text: str) -> str:
+    """Detect language from text content using script analysis.
+
+    Returns a language code (e.g. 'ru', 'en') based on the dominant script.
+    """
+    sample = text[:2000]
+
+    for pattern, lang in _SCRIPT_LANG_MAP:
+        matches = len(_re.findall(pattern, sample))
+        if matches > 20:
+            return lang
+
+    return "en"
+
+
 def strip_markdown(text: str) -> str:
     """Remove markdown formatting that causes edge-tts to hang or sound wrong."""
     text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
@@ -195,11 +223,29 @@ async def generate_voice_chunked(
         if on_progress:
             await on_progress((i + 1) / total_chunks, 1.0)
 
-    ogg_paths = []
-    for mp3_path in mp3_paths:
-        ogg_paths.append(convert_to_ogg(mp3_path))
+    # Concatenate chunks into a single audio file
+    if len(mp3_paths) == 1:
+        final_mp3 = mp3_paths[0]
+    else:
+        final_mp3 = Path(output_dir) / f"voice_{video_id}.mp3"
+        concat_mp3(mp3_paths, final_mp3)
 
-    return ogg_paths
+    return [convert_to_ogg(final_mp3)]
+
+
+def concat_mp3(parts: List[Path], output: Path) -> Path:
+    """Concatenate multiple mp3 files into one using ffmpeg."""
+    list_file = output.with_suffix(".txt")
+    list_file.write_text("\n".join(f"file '{p}'" for p in parts))
+    cmd = [
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+        "-i", str(list_file), "-c", "copy", str(output),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    list_file.unlink(missing_ok=True)
+    if result.returncode != 0:
+        raise TTSError(f"FFmpeg concat failed: {result.stderr}")
+    return output
 
 
 def convert_to_ogg(mp3_path: Path) -> Path:

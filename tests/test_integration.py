@@ -14,10 +14,11 @@ def mock_config():
     config = MagicMock()
     config.telegram_bot_token = "fake-token"
     config.elevenlabs_api_key = "fake-el-key"
-    config.anthropic_api_key = "fake-ant-key"
+    config.anthropic_api_key = ""
     config.tts_voice = "en-US-RogerNeural"
     config.claude_model = "claude-sonnet-4-6"
     config.max_tokens = 4096
+    config.memory_enabled = False
     config.is_user_allowed.return_value = True
     return config
 
@@ -45,7 +46,13 @@ def mock_update(mock_status_msg):
 
 @pytest.fixture
 def mock_context():
-    return MagicMock()
+    mgr = MagicMock()
+    mgr.get_user_settings = AsyncMock(
+        return_value={"anthropic_api_key": "fake-user-key", "elevenlabs_api_key": "fake-el-key"}
+    )
+    context = MagicMock()
+    context.bot_data = {"memory_mgr": mgr}
+    return context
 
 
 class TestFullPipeline:
