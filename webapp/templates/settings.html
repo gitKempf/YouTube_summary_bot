@@ -188,6 +188,11 @@
         .toast.success { background: rgba(52,199,89,0.9); color: #fff; }
         .toast.error { background: rgba(255,59,48,0.9); color: #fff; }
 
+        .claim-detail { font-size: 13px; color: var(--hint); margin-top: 4px; }
+        .claim-detail span { margin-right: 8px; }
+        .entity-claims { font-size: 13px; color: var(--hint); margin-top: 6px; line-height: 1.5; }
+        .conf-bar { display: inline-block; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+
         .section-label {
             font-size: 13px; font-weight: 600; color: var(--hint);
             text-transform: uppercase; letter-spacing: 0.5px;
@@ -202,8 +207,8 @@
 
     <div class="tabs">
         <div class="tab active" onclick="showSection('docs')" id="nav-docs">Documents</div>
+        <div class="tab" onclick="showSection('knowledge')" id="nav-knowledge">Knowledge</div>
         <div class="tab" onclick="showSection('settings')" id="nav-settings">Settings</div>
-        <a class="tab" href="/vault/" target="_blank">Knowledge</a>
     </div>
 
     <!-- Documents -->
@@ -266,6 +271,30 @@
                     <button class="btn btn-danger" id="remove-elevenlabs-btn" onclick="removeKey('elevenlabs')" style="display:none">Remove</button>
                 </div>
             </div>
+        </div>
+
+        <!-- Knowledge -->
+        <div id="knowledge-section" class="section">
+            <div class="search-wrap">
+                <svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+                <input type="text" class="search" id="knowledge-search"
+                       placeholder="Search claims and entities..." oninput="filterKnowledge()">
+            </div>
+
+            <div class="tabs" style="padding:0;margin-bottom:12px;position:static">
+                <div class="tab active" onclick="showKnowledgeTab('claims')" id="nav-k-claims">Claims</div>
+                <div class="tab" onclick="showKnowledgeTab('entities')" id="nav-k-entities">Entities</div>
+            </div>
+
+            <div id="claims-list" class="list-card">
+                <div class="doc" style="color:var(--hint);text-align:center;padding:24px">Loading...</div>
+            </div>
+
+            <div id="entities-list" class="list-card" style="display:none">
+                <div class="doc" style="color:var(--hint);text-align:center;padding:24px">Loading...</div>
+            </div>
+
+            <button class="btn btn-primary" style="margin-top:16px" onclick="exportVault()">Download Obsidian Vault (ZIP)</button>
         </div>
     </div>
 
@@ -381,6 +410,90 @@
                 else showToast('Failed', 'error');
             }).catch(() => showToast('Network error', 'error'));
         }
+
+        // Knowledge tab
+        let allClaims = [];
+        let allEntities = [];
+        let knowledgeLoaded = false;
+        let currentKTab = 'claims';
+
+        function showKnowledgeTab(tab) {
+            currentKTab = tab;
+            document.getElementById('claims-list').style.display = tab === 'claims' ? 'block' : 'none';
+            document.getElementById('entities-list').style.display = tab === 'entities' ? 'block' : 'none';
+            document.getElementById('nav-k-claims').classList.toggle('active', tab === 'claims');
+            document.getElementById('nav-k-entities').classList.toggle('active', tab === 'entities');
+        }
+
+        function loadKnowledge() {
+            if (knowledgeLoaded) return;
+            knowledgeLoaded = true;
+
+            fetch(`/api/claims?user_id=${userId}`).then(r => r.json()).then(claims => {
+                allClaims = claims;
+                renderClaims(claims);
+            });
+            fetch(`/api/entities?user_id=${userId}`).then(r => r.json()).then(entities => {
+                allEntities = entities;
+                renderEntities(entities);
+            });
+        }
+
+        function renderClaims(claims) {
+            const el = document.getElementById('claims-list');
+            if (!claims.length) {
+                el.innerHTML = '<div class="empty"><div class="icon">K</div><p>No claims yet.</p></div>';
+                return;
+            }
+            el.innerHTML = claims.map(c => {
+                const conf = Math.round((c.confidence || 0) * 100);
+                const color = conf >= 80 ? '#34c759' : conf >= 50 ? '#ff9500' : '#ff3b30';
+                return `<div class="doc">
+                    <div style="font-size:14px;line-height:1.4">${c.text}</div>
+                    <div class="claim-detail">
+                        <span><span class="conf-bar" style="width:${conf/3}px;background:${color}"></span>${conf}%</span>
+                        ${c.entity ? `<span>${c.entity}</span>` : ''}
+                        ${c.occurrences > 1 ? `<span class="chip chip-orange" style="font-size:10px">${c.occurrences}x</span>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function renderEntities(entities) {
+            const el = document.getElementById('entities-list');
+            if (!entities.length) {
+                el.innerHTML = '<div class="empty"><div class="icon">E</div><p>No entities yet.</p></div>';
+                return;
+            }
+            el.innerHTML = entities.map(e => {
+                const rels = (e.relationships || []).map(r => `${r.relation} ${r.target}`).join(', ');
+                return `<div class="doc">
+                    <div style="font-size:15px;font-weight:600">${e.name}</div>
+                    <div class="doc-meta"><span class="chip chip-green">${e.claim_count} claims</span></div>
+                    ${rels ? `<div class="entity-claims">${rels}</div>` : ''}
+                </div>`;
+            }).join('');
+        }
+
+        function filterKnowledge() {
+            const q = document.getElementById('knowledge-search').value.toLowerCase();
+            if (currentKTab === 'claims') {
+                renderClaims(q ? allClaims.filter(c => (c.text||'').toLowerCase().includes(q) || (c.entity||'').toLowerCase().includes(q)) : allClaims);
+            } else {
+                renderEntities(q ? allEntities.filter(e => (e.name||'').toLowerCase().includes(q)) : allEntities);
+            }
+        }
+
+        function exportVault() {
+            window.open(`/api/export/obsidian?user_id=${userId}`, '_blank');
+        }
+
+        // Hook: load knowledge data when tab is shown
+        const _origShowSection = showSection;
+        showSection = function(name) {
+            _origShowSection(name);
+            if (name === 'knowledge') loadKnowledge();
+        };
     </script>
 </body>
 </html>

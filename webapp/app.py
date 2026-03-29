@@ -2,25 +2,14 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Request, Header, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
 
-from webapp.routes import settings, videos, export
+from webapp.routes import settings, videos, export, knowledge
 from webapp.auth import validate_init_data, TelegramAuthError
 
-QUARTZ_PUBLIC = Path(__file__).parent / "quartz" / "public"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-
-
-def _check_telegram_auth(x_telegram_init_data: str = Header(None)):
-    """Dependency: validate Telegram initData from header."""
-    if not x_telegram_init_data or not BOT_TOKEN:
-        raise HTTPException(status_code=401, detail="Telegram authentication required")
-    try:
-        return validate_init_data(x_telegram_init_data, BOT_TOKEN)
-    except TelegramAuthError as e:
-        raise HTTPException(status_code=401, detail=str(e))
 
 
 def create_app(testing: bool = False) -> FastAPI:
@@ -48,6 +37,7 @@ def create_app(testing: bool = False) -> FastAPI:
     app.include_router(settings.router)
     app.include_router(videos.router)
     app.include_router(export.router)
+    app.include_router(knowledge.router)
 
     @app.get("/health")
     def health():
@@ -62,36 +52,6 @@ def create_app(testing: bool = False) -> FastAPI:
     def dashboard():
         html = (TEMPLATES_DIR / "settings.html").read_text()
         return HTMLResponse(content=html)
-
-    # Serve Quartz static site at /vault/ with .html fallback
-    if not testing and QUARTZ_PUBLIC.exists():
-        @app.get("/vault/{path:path}")
-        async def serve_vault(path: str):
-            file_path = QUARTZ_PUBLIC / path
-
-            if file_path.is_file():
-                return FileResponse(file_path)
-
-            html_path = file_path.with_suffix(".html")
-            if html_path.is_file():
-                return FileResponse(html_path)
-
-            index_path = file_path / "index.html"
-            if index_path.is_file():
-                return FileResponse(index_path)
-
-            not_found = QUARTZ_PUBLIC / "404.html"
-            if not_found.is_file():
-                return FileResponse(not_found, status_code=404)
-            return HTMLResponse("Not found", status_code=404)
-
-        @app.get("/vault")
-        @app.get("/vault/")
-        async def vault_root():
-            index = QUARTZ_PUBLIC / "index.html"
-            if index.is_file():
-                return FileResponse(index)
-            return HTMLResponse("Vault not built yet", status_code=404)
 
     return app
 
