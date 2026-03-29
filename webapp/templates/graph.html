@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Knowledge Graph</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+    <style>
+        :root {
+            --bg: var(--tg-theme-bg-color, #fff);
+            --text: var(--tg-theme-text-color, #1a1a1a);
+            --hint: var(--tg-theme-hint-color, #8e8e93);
+            --link: var(--tg-theme-link-color, #007aff);
+            --secondary: var(--tg-theme-secondary-bg-color, #f2f2f7);
+            --separator: rgba(60, 60, 67, 0.06);
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+        html, body { width: 100%; height: 100%; overflow: hidden;
+                     font-family: -apple-system, 'SF Pro Display', sans-serif;
+                     background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+
+        /* Fullscreen graph canvas */
+        #graph { position: absolute; inset: 0; touch-action: none; }
+        #graph svg { width: 100%; height: 100%; }
+
+        /* Floating search bar (map-style) */
+        .float-bar {
+            position: absolute; top: 12px; left: 12px; right: 12px; z-index: 20;
+            display: flex; gap: 8px; align-items: center;
+        }
+        .back-btn {
+            width: 40px; height: 40px; border: none; border-radius: 12px;
+            background: var(--bg); box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+            cursor: pointer; font-size: 20px; color: var(--hint);
+            display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        }
+        .search-box {
+            flex: 1; padding: 11px 14px; border: none; border-radius: 12px;
+            font-size: 15px; background: var(--bg); color: var(--text);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+        }
+        .search-box:focus { outline: none; box-shadow: 0 0 0 2px var(--link); }
+        .search-box::placeholder { color: var(--hint); }
+
+        /* Floating controls bottom-left */
+        .float-controls {
+            position: absolute; bottom: 20px; left: 12px; z-index: 20;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        .ctrl-btn {
+            width: 40px; height: 40px; border: none; border-radius: 12px;
+            background: var(--bg); box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+            cursor: pointer; font-size: 18px; color: var(--text);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .ctrl-btn:active { background: var(--secondary); }
+
+        /* Spacing slider bottom-right */
+        .float-slider {
+            position: absolute; bottom: 20px; right: 12px; z-index: 20;
+            background: var(--bg); border-radius: 12px; padding: 10px 14px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .float-slider label { font-size: 11px; color: var(--hint); font-weight: 600; white-space: nowrap; }
+        .float-slider input[type=range] { width: 80px; height: 4px; -webkit-appearance: none;
+                      background: var(--separator); border-radius: 2px; outline: none; }
+        .float-slider input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+            background: var(--link); cursor: pointer; }
+
+        /* Detail panel (slides up from bottom) */
+        .detail-panel {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            max-height: 55vh; background: var(--bg);
+            border-radius: 16px 16px 0 0;
+            box-shadow: 0 -4px 32px rgba(0,0,0,0.15);
+            z-index: 30; overflow-y: auto;
+            transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+        }
+        .detail-panel.open { transform: translateY(0); }
+        .detail-handle { width: 36px; height: 4px; border-radius: 2px; background: var(--separator);
+                         margin: 10px auto 0; }
+        .detail-header { display: flex; justify-content: space-between; align-items: center;
+                         padding: 12px 16px 4px; position: sticky; top: 0; background: var(--bg); }
+        .detail-header h3 { font-size: 17px; font-weight: 700; flex: 1; }
+        .detail-close { width: 28px; height: 28px; border: none; border-radius: 50%;
+                        background: var(--secondary); cursor: pointer; font-size: 16px;
+                        display: flex; align-items: center; justify-content: center; color: var(--hint); }
+        .detail-body { padding: 4px 16px 24px; }
+        .detail-body .row { display: flex; justify-content: space-between; padding: 10px 0;
+                            border-bottom: 1px solid var(--separator); font-size: 14px; }
+        .detail-body .row:last-child { border-bottom: none; }
+        .detail-body .row .lbl { color: var(--hint); }
+        .detail-body .row .val { font-weight: 500; text-align: right; max-width: 60%; }
+        .detail-body .claim-item { padding: 8px 0; border-bottom: 1px solid var(--separator);
+                                   font-size: 13px; line-height: 1.4; }
+        .detail-body .claim-item:last-child { border-bottom: none; }
+        .chip { display: inline-flex; padding: 4px 10px; border-radius: 6px; font-size: 12px;
+                font-weight: 600; cursor: pointer; margin-top: 8px; }
+        .chip-blue { background: rgba(0,122,255,0.1); color: #007aff; }
+        .chip-green { background: rgba(52,199,89,0.12); color: #248a3d; }
+
+        /* Legend */
+        .legend {
+            position: absolute; top: 64px; left: 12px; z-index: 20;
+            background: var(--bg); border-radius: 10px; padding: 8px 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08); font-size: 11px; color: var(--hint);
+            display: flex; gap: 12px;
+        }
+        .legend-item { display: flex; align-items: center; gap: 4px; }
+        .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+    </style>
+</head>
+<body>
+    <div id="graph"></div>
+
+    <div class="float-bar">
+        <button class="back-btn" onclick="goBack()">←</button>
+        <input type="text" class="search-box" id="graph-search" placeholder="Search nodes..." oninput="searchGraph()">
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#007aff"></div> Entity</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#34c759"></div> Video</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff9500"></div> Claim</div>
+    </div>
+
+    <div class="float-controls">
+        <button class="ctrl-btn" onclick="zoomIn()">+</button>
+        <button class="ctrl-btn" onclick="zoomOut()">−</button>
+        <button class="ctrl-btn" onclick="zoomFit()">⊡</button>
+    </div>
+
+    <div class="float-slider">
+        <label>Spacing</label>
+        <input type="range" id="spacing" min="20" max="200" value="70" oninput="updateSpacing(this.value)">
+    </div>
+
+    <div class="detail-panel" id="detail">
+        <div class="detail-handle"></div>
+        <div class="detail-header">
+            <h3 id="detail-title"></h3>
+            <button class="detail-close" onclick="closeDetail()">×</button>
+        </div>
+        <div class="detail-body" id="detail-body"></div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready(); tg.expand();
+        if (!tg.initData) { window.location.href = '/'; }
+
+        const _fetch = window.fetch;
+        window.fetch = (url, opts = {}) => {
+            opts.headers = { 'ngrok-skip-browser-warning': '1', 'X-Telegram-Init-Data': tg.initData || '', ...(opts.headers || {}) };
+            return _fetch(url, opts);
+        };
+
+        const user = tg.initDataUnsafe?.user;
+        const userId = user ? `tg_${user.id}` : '';
+
+        let sim, svgZoom, svgG, allNodes, allEdges, nodeEls, linkEls, labelEls;
+        let spacingMult = 70 / 70;
+
+        function goBack() { window.location.href = '/app'; }
+
+        // Load graph
+        fetch(`/api/graph?user_id=${userId}`).then(r => r.json()).then(data => {
+            if (!data.nodes?.length) {
+                document.getElementById('graph').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--hint)">No graph data yet</div>';
+                return;
+            }
+            // Also load claims for detail view
+            fetch(`/api/claims?user_id=${userId}`).then(r => r.json()).then(claims => {
+                window._claims = Array.isArray(claims) ? claims : [];
+                renderGraph(data);
+            });
+        });
+
+        function renderGraph(data) {
+            allNodes = data.nodes; allEdges = data.edges;
+            const el = document.getElementById('graph');
+            const W = el.clientWidth, H = el.clientHeight;
+            const colorMap = { entity: '#007aff', video: '#34c759', claim: '#ff9500' };
+            const maxSize = Math.max(...allNodes.map(n => n.size), 1);
+
+            const nr = n => {
+                if (n.type === 'claim') return 4;
+                if (n.type === 'video') return 18;
+                return Math.max(8, Math.min(26, 8 + (n.size / maxSize) * 18));
+            };
+
+            sim = d3.forceSimulation(allNodes)
+                .force('link', d3.forceLink(allEdges).id(d => d.id)
+                    .distance(d => { const b = d.type==='about'?50:d.type==='from'?60:100; return b*spacingMult; })
+                    .strength(0.15))
+                .force('charge', d3.forceManyBody().strength(d => d.type==='claim'?-50:-250))
+                .force('center', d3.forceCenter(W/2, H/2))
+                .force('collide', d3.forceCollide().radius(d => nr(d)+8));
+
+            const svg = d3.select(el).append('svg');
+            svgG = svg.append('g');
+
+            svgZoom = d3.zoom().scaleExtent([0.1, 6]).on('zoom', e => svgG.attr('transform', e.transform));
+            svg.call(svgZoom);
+
+            linkEls = svgG.append('g').selectAll('line').data(allEdges).join('line')
+                .attr('stroke', d => d.type==='about'?'rgba(0,122,255,0.1)':d.type==='from'?'rgba(52,199,89,0.1)':'rgba(142,142,147,0.12)')
+                .attr('stroke-width', 0.7);
+
+            nodeEls = svgG.append('g').selectAll('circle').data(allNodes).join('circle')
+                .attr('r', d => nr(d))
+                .attr('fill', d => colorMap[d.type]||'#8e8e93')
+                .attr('stroke', '#fff').attr('stroke-width', 1.5).attr('cursor', 'pointer')
+                .call(d3.drag()
+                    .on('start', (e,d) => { if(!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+                    .on('drag', (e,d) => { d.fx=e.x; d.fy=e.y; })
+                    .on('end', (e,d) => { if(!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }));
+
+            labelEls = svgG.append('g').selectAll('text').data(allNodes).join('text')
+                .text(d => d.type==='claim' ? (d.text||'').substring(0,28)+((d.text||'').length>28?'...':'') : d.label)
+                .attr('font-size', d => d.type==='claim'?'6px':d.type==='video'?'9px':nr(d)>14?'10px':'8px')
+                .attr('font-weight', d => d.type!=='claim'&&nr(d)>14?'600':'400')
+                .attr('fill', d => d.type==='claim'?'#aaa':'#333')
+                .attr('text-anchor', 'middle')
+                .attr('dy', d => nr(d)+(d.type==='claim'?7:13))
+                .attr('opacity', d => d.type==='claim'?0.45:0.85)
+                .attr('pointer-events', 'none');
+
+            // Hover
+            nodeEls.on('mouseover', (e, d) => {
+                const conn = new Set([d.id]);
+                allEdges.forEach(l => {
+                    const s=l.source.id??l.source, t=l.target.id??l.target;
+                    if(s===d.id)conn.add(t); if(t===d.id)conn.add(s);
+                });
+                nodeEls.attr('opacity', n => conn.has(n.id)?1:0.1);
+                linkEls.attr('opacity', l => (l.source.id??l.source)===d.id||(l.target.id??l.target)===d.id?1:0.03);
+                labelEls.attr('opacity', n => conn.has(n.id)?1:0.06);
+            }).on('mouseout', () => {
+                nodeEls.attr('opacity', 1); linkEls.attr('opacity', 1);
+                labelEls.attr('opacity', d => d.type==='claim'?0.45:0.85);
+            });
+
+            // Click → detail panel
+            nodeEls.on('click', (e, d) => { e.stopPropagation(); showDetail(d); });
+            svg.on('click', () => closeDetail());
+
+            sim.on('tick', () => {
+                linkEls.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y).attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+                nodeEls.attr('cx',d=>d.x).attr('cy',d=>d.y);
+                labelEls.attr('x',d=>d.x).attr('y',d=>d.y);
+            });
+        }
+
+        // Detail panel
+        function showDetail(d) {
+            let body = '';
+            let title = '';
+            if (d.type === 'claim') {
+                title = 'Claim';
+                body = `<div style="margin-bottom:12px;line-height:1.5">${(d.text||'').replace(/</g,'&lt;')}</div>`;
+                if (d.entity) body += `<div class="row"><span class="lbl">Entity</span><span class="val">${d.entity}</span></div>`;
+                if (d.video_id) body += `<div class="row"><span class="lbl">Video</span><span class="val">${d.video_id}</span></div>`;
+            } else if (d.type === 'video') {
+                title = d.label;
+                body = `<div class="row"><span class="lbl">Video ID</span><span class="val">${d.id.replace('v:','')}</span></div>`;
+                body += `<div style="margin-top:8px"><a href="https://youtube.com/watch?v=${d.id.replace('v:','')}" target="_blank" class="chip chip-green" style="text-decoration:none">Open on YouTube</a></div>`;
+                const vClaims = (window._claims||[]).filter(c => c.video_id === d.id.replace('v:',''));
+                if (vClaims.length) {
+                    body += `<div style="margin-top:12px;font-size:13px;color:var(--hint);font-weight:600">${vClaims.length} Claims</div>`;
+                    vClaims.slice(0,10).forEach(c => { body += `<div class="claim-item">${c.text}</div>`; });
+                    if (vClaims.length > 10) body += `<div style="padding:8px 0;color:var(--hint);font-size:12px">+ ${vClaims.length-10} more</div>`;
+                }
+            } else {
+                title = d.label;
+                body = `<div class="row"><span class="lbl">Claims</span><span class="val">${d.size}</span></div>`;
+                const eClaims = (window._claims||[]).filter(c => c.entity === d.label);
+                if (eClaims.length) {
+                    eClaims.slice(0,10).forEach(c => { body += `<div class="claim-item">${c.text}</div>`; });
+                    if (eClaims.length > 10) body += `<div style="padding:8px 0;color:var(--hint);font-size:12px">+ ${eClaims.length-10} more</div>`;
+                }
+            }
+            document.getElementById('detail-title').textContent = title;
+            document.getElementById('detail-body').innerHTML = body;
+            document.getElementById('detail').classList.add('open');
+        }
+
+        function closeDetail() { document.getElementById('detail').classList.remove('open'); }
+
+        // Zoom controls
+        function zoomIn() { d3.select('#graph svg').transition().call(svgZoom.scaleBy, 1.5); }
+        function zoomOut() { d3.select('#graph svg').transition().call(svgZoom.scaleBy, 0.67); }
+        function zoomFit() { d3.select('#graph svg').transition().call(svgZoom.transform, d3.zoomIdentity); }
+
+        // Spacing
+        function updateSpacing(val) {
+            spacingMult = val / 70;
+            if (sim) {
+                sim.force('link').distance(d => {
+                    const b = d.type==='about'?50:d.type==='from'?60:100;
+                    return b * spacingMult;
+                });
+                sim.alpha(0.5).restart();
+            }
+        }
+
+        // Search: highlight matching nodes
+        function searchGraph() {
+            const q = document.getElementById('graph-search').value.toLowerCase();
+            if (!q) {
+                nodeEls?.attr('opacity', 1);
+                labelEls?.attr('opacity', d => d.type==='claim'?0.45:0.85);
+                linkEls?.attr('opacity', 1);
+                return;
+            }
+            const match = new Set();
+            allNodes.forEach(n => {
+                const text = (n.label + ' ' + (n.text||'')).toLowerCase();
+                if (text.includes(q)) match.add(n.id);
+            });
+            nodeEls.attr('opacity', n => match.has(n.id) ? 1 : 0.08);
+            labelEls.attr('opacity', n => match.has(n.id) ? 1 : 0.05);
+            linkEls.attr('opacity', 0.03);
+        }
+    </script>
+</body>
+</html>

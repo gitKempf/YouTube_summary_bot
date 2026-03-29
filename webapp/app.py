@@ -53,6 +53,11 @@ def create_app(testing: bool = False) -> FastAPI:
         html = (TEMPLATES_DIR / "settings.html").read_text()
         return HTMLResponse(content=html)
 
+    @app.get("/graph", response_class=HTMLResponse)
+    def graph_view():
+        html = (TEMPLATES_DIR / "graph.html").read_text()
+        return HTMLResponse(content=html)
+
     return app
 
 
