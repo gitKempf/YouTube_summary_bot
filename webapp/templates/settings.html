@@ -439,10 +439,14 @@
             container.innerHTML = '';
             const W = container.clientWidth, H = container.clientHeight;
 
-            const colorMap = { entity: '#007aff', video: '#34c759' };
+            const colorMap = { entity: '#007aff', video: '#34c759', claim: '#ff9500' };
             const maxSize = Math.max(...data.nodes.map(n => n.size));
 
-            const r = n => Math.max(4, Math.min(24, 4 + (n.size / Math.max(maxSize, 1)) * 20));
+            const r = n => {
+                if (n.type === 'claim') return 3;
+                if (n.type === 'video') return 14;
+                return Math.max(6, Math.min(22, 6 + (n.size / Math.max(maxSize, 1)) * 16));
+            };
 
             // D3 force simulation
             const simulation = d3.forceSimulation(data.nodes)
@@ -468,8 +472,12 @@
                 .selectAll('line')
                 .data(data.edges)
                 .join('line')
-                .attr('stroke', d => d.type === 'co_occurs' ? 'rgba(0,122,255,0.15)' : 'rgba(52,199,89,0.25)')
-                .attr('stroke-width', d => d.type === 'co_occurs' ? 1 : 1.5);
+                .attr('stroke', d => {
+                    if (d.type === 'about') return 'rgba(0,122,255,0.12)';
+                    if (d.type === 'from') return 'rgba(52,199,89,0.12)';
+                    return 'rgba(142,142,147,0.15)';
+                })
+                .attr('stroke-width', 0.8);
 
             // Nodes
             const node = g.append('g')
@@ -487,18 +495,19 @@
                     .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
                 );
 
-            // Labels
+            // Labels (only for entities and videos, not claims)
+            const labelData = data.nodes.filter(n => n.type !== 'claim');
             const label = g.append('g')
                 .selectAll('text')
-                .data(data.nodes)
+                .data(labelData)
                 .join('text')
                 .text(d => d.label)
-                .attr('font-size', d => r(d) > 10 ? '10px' : '8px')
-                .attr('font-weight', d => r(d) > 14 ? '600' : '400')
+                .attr('font-size', d => d.type === 'video' ? '9px' : r(d) > 12 ? '10px' : '8px')
+                .attr('font-weight', d => r(d) > 12 ? '600' : '400')
                 .attr('fill', '#333')
                 .attr('text-anchor', 'middle')
                 .attr('dy', d => r(d) + 12)
-                .attr('opacity', d => r(d) > 6 ? 1 : 0.6)
+                .attr('opacity', 0.8)
                 .attr('pointer-events', 'none');
 
             // Hover + tap
@@ -524,7 +533,11 @@
                 label.attr('opacity', d => r(d) > 6 ? 1 : 0.6);
             }).on('click', (e, d) => {
                 const info = document.getElementById('graph-info');
-                if (d.type === 'video') {
+                if (d.type === 'claim') {
+                    const esc = (d.text || d.label).replace(/</g, '&lt;');
+                    info.innerHTML = `<div style="text-align:left;font-size:13px;line-height:1.4">${esc}</div>` +
+                        (d.entity ? `<div style="margin-top:6px"><span class="chip chip-blue chip-link" onclick="filterClaimsByEntity('${(d.entity||'').replace(/'/g,"\\'")}')">Entity: ${d.entity}</span></div>` : '');
+                } else if (d.type === 'video') {
                     info.innerHTML = `<b>${d.label}</b> (video) — ` +
                         `<span class="chip chip-link chip-green" onclick="showClaimsForVideo('${d.id.replace('v:','')}','${d.label}')">View claims</span>`;
                 } else {
@@ -532,6 +545,10 @@
                         `<span class="chip chip-link chip-blue" onclick="filterClaimsByEntity('${d.label.replace(/'/g,"\\'")}')">View claims</span>`;
                 }
             });
+
+            // Adjust forces for larger graph with claims
+            simulation.force('charge').strength(d => d.type === 'claim' ? -30 : -120);
+            simulation.force('link').distance(d => d.type === 'about' ? 25 : d.type === 'from' ? 35 : 60);
 
             simulation.on('tick', () => {
                 link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)

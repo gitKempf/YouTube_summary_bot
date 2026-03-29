@@ -129,52 +129,74 @@ def get_graph(user_id: str = Query(...)):
     except Exception:
         return {"nodes": [], "edges": []}
 
-    # Collect entities per video and entity claim counts
+    # Collect claims, entities, videos
     entity_counts = {}
-    video_entities: dict[str, set] = {}  # video_id -> set of entities
+    claim_nodes = []
 
     for p in points:
         meta = p.payload.get("metadata", {})
         entity = meta.get("entity", p.payload.get("entity", ""))
         video_id = meta.get("video_id", p.payload.get("video_id", ""))
-        if not entity:
-            continue
-        entity_counts[entity] = entity_counts.get(entity, 0) + 1
-        if video_id:
-            video_entities.setdefault(video_id, set()).add(entity)
+        text = p.payload.get("data", p.payload.get("memory", ""))
+        claim_id = f"c:{p.id}"
+
+        if entity:
+            entity_counts[entity] = entity_counts.get(entity, 0) + 1
+
+        claim_nodes.append({
+            "id": claim_id,
+            "text": text,
+            "entity": entity,
+            "video_id": video_id,
+        })
 
     # Build nodes
     nodes = []
     node_ids = set()
+
+    # Entity nodes
     for entity, count in entity_counts.items():
         nodes.append({"id": entity, "label": entity, "type": "entity", "size": count})
         node_ids.add(entity)
 
-    for vid in video_entities:
-        nodes.append({"id": f"v:{vid}", "label": vid[:12], "type": "video", "size": len(video_entities[vid])})
+    # Video nodes
+    video_ids = set()
+    for c in claim_nodes:
+        if c["video_id"]:
+            video_ids.add(c["video_id"])
+    for vid in video_ids:
+        nodes.append({"id": f"v:{vid}", "label": vid[:12], "type": "video", "size": 3})
         node_ids.add(f"v:{vid}")
+
+    # Claim nodes
+    for c in claim_nodes:
+        label = (c["text"] or "")[:40]
+        if len(c["text"] or "") > 40:
+            label += "..."
+        nodes.append({"id": c["id"], "label": label, "type": "claim", "size": 1,
+                       "text": c["text"], "entity": c["entity"], "video_id": c["video_id"]})
+        node_ids.add(c["id"])
 
     # Build edges
     edges = []
     edge_set = set()
 
-    # Entity <-> Video edges
-    for vid, ents in video_entities.items():
-        for ent in ents:
-            key = (ent, f"v:{vid}")
+    for c in claim_nodes:
+        # Claim -> Entity
+        if c["entity"] and c["entity"] in node_ids:
+            key = (c["id"], c["entity"])
             if key not in edge_set:
                 edge_set.add(key)
-                edges.append({"source": ent, "target": f"v:{vid}", "type": "appears_in"})
+                edges.append({"source": c["id"], "target": c["entity"], "type": "about"})
 
-    # Entity <-> Entity co-occurrence (same video)
-    for vid, ents in video_entities.items():
-        ent_list = sorted(ents)
-        for i in range(len(ent_list)):
-            for j in range(i + 1, len(ent_list)):
-                key = (ent_list[i], ent_list[j])
+        # Claim -> Video
+        if c["video_id"]:
+            vid_key = f"v:{c['video_id']}"
+            if vid_key in node_ids:
+                key = (c["id"], vid_key)
                 if key not in edge_set:
                     edge_set.add(key)
-                    edges.append({"source": ent_list[i], "target": ent_list[j], "type": "co_occurs"})
+                    edges.append({"source": c["id"], "target": vid_key, "type": "from"})
 
     # Neo4j relationships (bonus)
     try:
