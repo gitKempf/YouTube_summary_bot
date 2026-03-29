@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>YouTube Summary Bot</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
     <style>
         :root {
             --bg: var(--tg-theme-bg-color, #fff);
@@ -127,11 +127,14 @@
         .conf-bar { display: inline-block; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 3px; }
         .claim-triple { font-size: 13px; color: var(--text); margin-top: 4px; opacity: 0.7; }
 
-        #graph-container { width: 100%; height: 400px; background: var(--bg); border-radius: var(--radius);
-                           box-shadow: var(--card-shadow); margin-top: 4px; }
+        #graph-container { width: 100%; height: 450px; background: var(--bg); border-radius: var(--radius);
+                           box-shadow: var(--card-shadow); margin-top: 4px; overflow: hidden;
+                           touch-action: none; }
+        #graph-container svg { width: 100%; height: 100%; }
         .graph-info { text-align: center; padding: 12px; font-size: 13px; color: var(--hint);
                       background: var(--bg); border-radius: var(--radius); box-shadow: var(--card-shadow);
                       margin-top: 8px; }
+        .graph-info b { color: var(--text); }
 
         .filter-banner { display: flex; align-items: center; justify-content: space-between;
                          background: rgba(0,122,255,0.08); border-radius: 10px; padding: 10px 14px;
@@ -411,61 +414,130 @@
             }
         }
 
-        // ── Graph ──
+        // ── Graph (D3 Force SVG) ──
         function initGraph() {
-            if (!allEntities.length) return;
             graphReady = true;
-            const nodes = [], edges = [], seen = new Set();
+            const container = document.getElementById('graph-container');
+            container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--hint)">Loading graph...</div>';
 
-            allEntities.forEach(e => {
-                if (!e.name) return;
-                nodes.push({ data: { id: e.name, label: e.name, size: Math.min(10 + e.claim_count * 3, 50) } });
-                seen.add(e.name);
-                (e.relationships || []).forEach(r => {
-                    if (r.target && !seen.has(r.target)) {
-                        nodes.push({ data: { id: r.target, label: r.target, size: 10 } });
-                        seen.add(r.target);
-                    }
-                    if (r.target) {
-                        edges.push({ data: { source: e.name, target: r.target, label: r.relation } });
-                    }
+            fetch(`/api/graph?user_id=${userId}`).then(r => {
+                if (!r.ok) throw new Error();
+                return r.json();
+            }).then(data => {
+                if (!data.nodes || !data.nodes.length) {
+                    container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--hint)">Process more videos to build the graph.</div>';
+                    return;
+                }
+                renderGraph(data);
+            }).catch(() => {
+                container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--hint)">Failed to load graph.</div>';
+            });
+        }
+
+        function renderGraph(data) {
+            const container = document.getElementById('graph-container');
+            container.innerHTML = '';
+            const W = container.clientWidth, H = container.clientHeight;
+
+            const colorMap = { entity: '#007aff', video: '#34c759' };
+            const maxSize = Math.max(...data.nodes.map(n => n.size));
+
+            const r = n => Math.max(4, Math.min(24, 4 + (n.size / Math.max(maxSize, 1)) * 20));
+
+            // D3 force simulation
+            const simulation = d3.forceSimulation(data.nodes)
+                .force('link', d3.forceLink(data.edges).id(d => d.id).distance(60).strength(0.3))
+                .force('charge', d3.forceManyBody().strength(-120))
+                .force('center', d3.forceCenter(W / 2, H / 2))
+                .force('collide', d3.forceCollide().radius(d => r(d) + 8));
+
+            const svg = d3.select(container).append('svg')
+                .attr('viewBox', [0, 0, W, H])
+                .attr('preserveAspectRatio', 'xMidYMid meet');
+
+            const g = svg.append('g');
+
+            // Zoom
+            const zoom = d3.zoom()
+                .scaleExtent([0.3, 4])
+                .on('zoom', e => g.attr('transform', e.transform));
+            svg.call(zoom);
+
+            // Edges
+            const link = g.append('g')
+                .selectAll('line')
+                .data(data.edges)
+                .join('line')
+                .attr('stroke', d => d.type === 'co_occurs' ? 'rgba(0,122,255,0.15)' : 'rgba(52,199,89,0.25)')
+                .attr('stroke-width', d => d.type === 'co_occurs' ? 1 : 1.5);
+
+            // Nodes
+            const node = g.append('g')
+                .selectAll('circle')
+                .data(data.nodes)
+                .join('circle')
+                .attr('r', d => r(d))
+                .attr('fill', d => colorMap[d.type] || '#8e8e93')
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 1.5)
+                .attr('cursor', 'pointer')
+                .call(d3.drag()
+                    .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+                    .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+                    .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+                );
+
+            // Labels
+            const label = g.append('g')
+                .selectAll('text')
+                .data(data.nodes)
+                .join('text')
+                .text(d => d.label)
+                .attr('font-size', d => r(d) > 10 ? '10px' : '8px')
+                .attr('font-weight', d => r(d) > 14 ? '600' : '400')
+                .attr('fill', '#333')
+                .attr('text-anchor', 'middle')
+                .attr('dy', d => r(d) + 12)
+                .attr('opacity', d => r(d) > 6 ? 1 : 0.6)
+                .attr('pointer-events', 'none');
+
+            // Hover + tap
+            node.on('mouseover', (e, d) => {
+                const connected = new Set();
+                data.edges.forEach(l => {
+                    const s = typeof l.source === 'object' ? l.source.id : l.source;
+                    const t = typeof l.target === 'object' ? l.target.id : l.target;
+                    if (s === d.id) connected.add(t);
+                    if (t === d.id) connected.add(s);
                 });
+                connected.add(d.id);
+                node.attr('opacity', n => connected.has(n.id) ? 1 : 0.15);
+                link.attr('opacity', l => {
+                    const s = typeof l.source === 'object' ? l.source.id : l.source;
+                    const t = typeof l.target === 'object' ? l.target.id : l.target;
+                    return s === d.id || t === d.id ? 1 : 0.05;
+                });
+                label.attr('opacity', n => connected.has(n.id) ? 1 : 0.1);
+            }).on('mouseout', () => {
+                node.attr('opacity', 1);
+                link.attr('opacity', 1);
+                label.attr('opacity', d => r(d) > 6 ? 1 : 0.6);
+            }).on('click', (e, d) => {
+                const info = document.getElementById('graph-info');
+                if (d.type === 'video') {
+                    info.innerHTML = `<b>${d.label}</b> (video) — ` +
+                        `<span class="chip chip-link chip-green" onclick="showClaimsForVideo('${d.id.replace('v:','')}','${d.label}')">View claims</span>`;
+                } else {
+                    info.innerHTML = `<b>${d.label}</b> — ${d.size} claims — ` +
+                        `<span class="chip chip-link chip-blue" onclick="filterClaimsByEntity('${d.label.replace(/'/g,"\\'")}')">View claims</span>`;
+                }
             });
 
-            if (!nodes.length) {
-                document.getElementById('graph-info').textContent = 'No graph data yet. Process more videos to build connections.';
-                return;
-            }
-
-            const cy = cytoscape({
-                container: document.getElementById('graph-container'),
-                elements: { nodes, edges },
-                style: [
-                    { selector: 'node', style: {
-                        'background-color': '#007aff', 'label': 'data(label)',
-                        'font-size': '10px', 'color': '#333', 'text-valign': 'bottom',
-                        'text-margin-y': 6, 'width': 'data(size)', 'height': 'data(size)',
-                    }},
-                    { selector: 'edge', style: {
-                        'width': 1.5, 'line-color': '#c7c7cc', 'target-arrow-color': '#c7c7cc',
-                        'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
-                        'label': 'data(label)', 'font-size': '8px', 'color': '#8e8e93',
-                        'text-rotation': 'autorotate',
-                    }},
-                    { selector: ':selected', style: {
-                        'background-color': '#5856d6', 'border-width': 2, 'border-color': '#007aff',
-                    }},
-                ],
-                layout: { name: 'cose', animate: true, animationDuration: 500,
-                           nodeRepulsion: 8000, idealEdgeLength: 80 },
-                userZoomingEnabled: true, userPanningEnabled: true,
-            });
-
-            cy.on('tap', 'node', evt => {
-                const name = evt.target.id();
-                document.getElementById('graph-info').innerHTML =
-                    `<b>${name}</b> — ${(allEntities.find(e=>e.name===name)||{}).claim_count||0} claims ` +
-                    `<span class="chip chip-link chip-blue" onclick="filterClaimsByEntity('${name.replace(/'/g,"\\'")}')">View claims</span>`;
+            simulation.on('tick', () => {
+                link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+                node.attr('cx', d => d.x).attr('cy', d => d.y);
+                label.attr('x', d => d.x).attr('y', d => d.y);
             });
         }
 
