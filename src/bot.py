@@ -267,7 +267,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     audio_path = None
     voice_paths: List[Path] = []
 
-    # Resolve per-user API keys (required)
+    # Resolve per-user API keys
     memory_mgr = context.bot_data.get("memory_mgr")
     user_mem_id = f"tg_{update.effective_user.id}"
     api_key = None
@@ -280,16 +280,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    missing_keys = []
     if not api_key:
-        missing_keys.append("Anthropic")
-    if not elevenlabs_key:
-        missing_keys.append("ElevenLabs")
-
-    if missing_keys:
         await update.message.reply_text(
-            f"You need to set your {' and '.join(missing_keys)} API "
-            f"key{'s' if len(missing_keys) > 1 else ''} before using the bot.\n\n"
+            "You need to set your Anthropic API key before using the bot.\n\n"
             "Tap the button below to configure.",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("Configure API Keys", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app")),
@@ -318,6 +311,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await progress.update(10, "Transcript fetched")
         else:
             # Fallback path: download + ElevenLabs (0% -> 10% -> 25%)
+            if not elevenlabs_key:
+                await update.message.reply_text(
+                    "This video has no captions. Transcription requires an ElevenLabs API key.\n\n"
+                    "Tap below to add it, then try again.",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Configure API Keys", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app")),
+                    ]]),
+                )
+                return
             await progress.update(5, "No captions found. Downloading audio...")
             logger.info("No captions available, downloading audio for transcription")
             audio_path = await asyncio.to_thread(download_audio, url)

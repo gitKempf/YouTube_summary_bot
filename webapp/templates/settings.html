@@ -238,24 +238,13 @@
 
         <!-- Settings -->
         <div id="settings-section" class="section">
-            <div class="section-label">Status</div>
-            <div class="settings-group">
-                <div class="settings-row">
-                    <span class="label">Anthropic</span>
+            <div class="key-card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                    <label style="margin:0">Anthropic</label>
                     <span class="status-text" id="anthropic-status"></span>
                 </div>
-                <div class="settings-row">
-                    <span class="label">ElevenLabs</span>
-                    <span class="status-text" id="elevenlabs-status"></span>
-                </div>
-            </div>
-
-            <div class="section-label" style="margin-top:20px">API Keys</div>
-
-            <div class="key-card">
-                <label>Anthropic</label>
                 <input type="password" id="anthropic-key-input" placeholder="sk-ant-api03-..." autocomplete="off">
-                <p class="hint">For summarization. <a href="https://console.anthropic.com/settings/keys" target="_blank">Get a key</a></p>
+                <p class="hint">Required for summarization. <a href="https://console.anthropic.com/settings/keys" target="_blank">Get a key</a></p>
                 <div class="key-actions">
                     <button class="btn btn-primary" onclick="saveKey('anthropic')">Save</button>
                     <button class="btn btn-danger" id="remove-anthropic-btn" onclick="removeKey('anthropic')" style="display:none">Remove</button>
@@ -263,9 +252,12 @@
             </div>
 
             <div class="key-card">
-                <label>ElevenLabs</label>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                    <label style="margin:0">ElevenLabs</label>
+                    <span class="status-text" id="elevenlabs-status"></span>
+                </div>
                 <input type="password" id="elevenlabs-key-input" placeholder="sk_..." autocomplete="off">
-                <p class="hint">For transcription. <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank">Get a key</a></p>
+                <p class="hint">For videos without captions. <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank">Get a key</a></p>
                 <div class="key-actions">
                     <button class="btn btn-primary" onclick="saveKey('elevenlabs')">Save</button>
                     <button class="btn btn-danger" id="remove-elevenlabs-btn" onclick="removeKey('elevenlabs')" style="display:none">Remove</button>
