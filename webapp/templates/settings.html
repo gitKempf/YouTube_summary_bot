@@ -495,19 +495,21 @@
                     .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
                 );
 
-            // Labels (only for entities and videos, not claims)
-            const labelData = data.nodes.filter(n => n.type !== 'claim');
+            // Labels for all nodes
             const label = g.append('g')
                 .selectAll('text')
-                .data(labelData)
+                .data(data.nodes)
                 .join('text')
-                .text(d => d.label)
-                .attr('font-size', d => d.type === 'video' ? '9px' : r(d) > 12 ? '10px' : '8px')
-                .attr('font-weight', d => r(d) > 12 ? '600' : '400')
-                .attr('fill', '#333')
+                .text(d => {
+                    if (d.type === 'claim') return (d.text || d.label || '').substring(0, 30) + ((d.text||'').length > 30 ? '...' : '');
+                    return d.label;
+                })
+                .attr('font-size', d => d.type === 'claim' ? '7px' : d.type === 'video' ? '9px' : r(d) > 12 ? '10px' : '8px')
+                .attr('font-weight', d => d.type === 'claim' ? '400' : r(d) > 12 ? '600' : '400')
+                .attr('fill', d => d.type === 'claim' ? '#8e8e93' : '#333')
                 .attr('text-anchor', 'middle')
-                .attr('dy', d => r(d) + 12)
-                .attr('opacity', 0.8)
+                .attr('dy', d => r(d) + (d.type === 'claim' ? 8 : 12))
+                .attr('opacity', d => d.type === 'claim' ? 0.6 : 0.8)
                 .attr('pointer-events', 'none');
 
             // Hover + tap
