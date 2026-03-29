@@ -276,14 +276,25 @@
         tg.ready();
         tg.expand();
 
+        // Redirect to landing if not inside Telegram
+        if (!tg.initData) {
+            window.location.href = '/';
+        }
+
+        // Wrap fetch to include Telegram auth + ngrok bypass
         const _fetch = window.fetch;
         window.fetch = (url, opts = {}) => {
-            opts.headers = { 'ngrok-skip-browser-warning': '1', ...(opts.headers || {}) };
+            opts.headers = {
+                'ngrok-skip-browser-warning': '1',
+                'X-Telegram-Init-Data': tg.initData || '',
+                ...(opts.headers || {}),
+            };
             return _fetch(url, opts);
         };
 
         const user = tg.initDataUnsafe?.user;
-        const userId = user ? `tg_${user.id}` : 'tg_120292793';
+        if (!user) { document.body.innerHTML = '<p style="padding:40px;text-align:center;color:#999">Open this app from Telegram.</p>'; }
+        const userId = user ? `tg_${user.id}` : '';
         let allDocs = [];
 
         function showSection(name) {

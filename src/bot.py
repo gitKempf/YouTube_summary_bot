@@ -147,7 +147,7 @@ async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Open your dashboard to view claims, knowledge graph, and export vault:",
         reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("Open Dashboard", web_app=WebAppInfo(url=WEBAPP_URL)),
+            InlineKeyboardButton("Open Dashboard", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app")),
         ]]),
     )
 
@@ -292,7 +292,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"key{'s' if len(missing_keys) > 1 else ''} before using the bot.\n\n"
             "Tap the button below to configure.",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Configure API Keys", web_app=WebAppInfo(url=WEBAPP_URL)),
+                InlineKeyboardButton("Configure API Keys", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app")),
             ]]),
         )
         return
