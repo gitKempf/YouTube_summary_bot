@@ -1,6 +1,6 @@
 python-telegram-bot>=22.0
 youtube-transcript-api
-pytubefix
+yt-dlp
 elevenlabs
 anthropic
 edge-tts

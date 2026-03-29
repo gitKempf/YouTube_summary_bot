@@ -70,28 +70,25 @@ class TestFetchTranscript:
 
 
 class TestDownloadAudio:
-    @patch("src.downloader.YouTube")
-    def test_downloads_audio_stream(self, mock_yt_class):
-        mock_yt = MagicMock()
-        mock_yt_class.return_value = mock_yt
-        mock_stream = MagicMock()
-        mock_yt.streams.filter.return_value.first.return_value = mock_stream
+    @patch("src.downloader.subprocess.run")
+    @patch("src.downloader.Path.exists", return_value=True)
+    def test_downloads_audio_with_ytdlp(self, mock_exists, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
 
         result = download_audio(
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ", output_dir="/tmp"
         )
 
-        mock_stream.download.assert_called_once_with(
-            output_path="/tmp", filename="audio_dQw4w9WgXcQ.mp4"
-        )
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "yt-dlp"
+        assert "--extract-audio" in cmd
         assert isinstance(result, Path)
         assert "dQw4w9WgXcQ" in str(result)
 
-    @patch("src.downloader.YouTube")
-    def test_raises_when_no_audio_stream(self, mock_yt_class):
-        mock_yt = MagicMock()
-        mock_yt_class.return_value = mock_yt
-        mock_yt.streams.filter.return_value.first.return_value = None
+    @patch("src.downloader.subprocess.run")
+    def test_raises_on_ytdlp_failure(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stderr="ERROR: video unavailable")
 
-        with pytest.raises(RuntimeError, match="No audio stream found"):
+        with pytest.raises(RuntimeError, match="yt-dlp failed"):
             download_audio("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
