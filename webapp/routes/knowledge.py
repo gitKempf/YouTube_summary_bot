@@ -159,13 +159,34 @@ def get_graph(user_id: str = Query(...)):
         nodes.append({"id": entity, "label": entity, "type": "entity", "size": count})
         node_ids.add(entity)
 
-    # Video nodes
+    # Video nodes — fetch titles from transcripts
     video_ids = set()
     for c in claim_nodes:
         if c["video_id"]:
             video_ids.add(c["video_id"])
+
+    video_titles = {}
+    if video_ids:
+        try:
+            pts, _ = qdrant.scroll(
+                collection_name="youtube_bot_transcripts",
+                scroll_filter=models.Filter(
+                    must=[models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))]
+                ),
+                limit=100,
+                with_payload=True,
+            )
+            for p in pts:
+                vid = p.payload.get("video_id", "")
+                title = p.payload.get("title", "")
+                if vid and title:
+                    video_titles[vid] = title
+        except Exception:
+            pass
+
     for vid in video_ids:
-        nodes.append({"id": f"v:{vid}", "label": vid[:12], "type": "video", "size": 3})
+        title = video_titles.get(vid, vid[:12])
+        nodes.append({"id": f"v:{vid}", "label": title, "type": "video", "size": 3})
         node_ids.add(f"v:{vid}")
 
     # Claim nodes
