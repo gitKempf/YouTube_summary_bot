@@ -31,15 +31,15 @@ def extract_video_id(url: str) -> str:
     return match.group(1)
 
 
-_TRANSCRIPT_RETRIES = 3
-_TRANSCRIPT_RETRY_DELAY = 2
+_TRANSCRIPT_RETRIES = 5
+_TRANSCRIPT_BACKOFF = [3, 6, 12, 20]  # seconds between retries (exponential-ish)
 
 
 def fetch_transcript(video_id: str) -> Optional[TranscriptFetchResult]:
     """Try to fetch YouTube's built-in captions with retries.
 
     Returns None only if the video genuinely has no captions.
-    Retries on network/API errors to handle intermittent failures.
+    Retries with exponential backoff on network/API errors and rate limiting.
     """
     for attempt in range(_TRANSCRIPT_RETRIES):
         try:
@@ -60,7 +60,8 @@ def fetch_transcript(video_id: str) -> Optional[TranscriptFetchResult]:
                 attempt + 1, _TRANSCRIPT_RETRIES, video_id, e,
             )
             if attempt < _TRANSCRIPT_RETRIES - 1:
-                time.sleep(_TRANSCRIPT_RETRY_DELAY)
+                delay = _TRANSCRIPT_BACKOFF[min(attempt, len(_TRANSCRIPT_BACKOFF) - 1)]
+                time.sleep(delay)
     return None
 
 

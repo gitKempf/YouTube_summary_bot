@@ -7,7 +7,7 @@ from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisable
 from src.downloader import (
     extract_video_id, download_audio, fetch_transcript,
     TranscriptFetchResult, _build_ytdlp_cmd, _PLAYER_CLIENTS,
-    _TRANSCRIPT_RETRIES,
+    _TRANSCRIPT_RETRIES, _TRANSCRIPT_BACKOFF,
 )
 
 
