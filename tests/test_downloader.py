@@ -228,12 +228,36 @@ class TestDownloadAudio:
         """Should try multiple player clients when bot detection is hit."""
         mock_run.return_value = MagicMock(
             returncode=1,
-            stderr="ERROR: Sign in to confirm you're not a bot"
+            stderr="ERROR: [youtube] xyz: Sign in to confirm you're not a bot"
         )
         with pytest.raises(RuntimeError, match="YouTube is blocking"):
             download_audio("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
         # Should have tried all player client combinations
+        assert mock_run.call_count == len(_PLAYER_CLIENTS)
+
+    @patch("src.downloader.subprocess.run")
+    def test_retries_on_login_required(self, mock_run):
+        """Should retry when LOGIN_REQUIRED appears in stderr."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stderr="WARNING: lots of text... LOGIN_REQUIRED ... more text"
+        )
+        with pytest.raises(RuntimeError, match="YouTube is blocking"):
+            download_audio("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
+        assert mock_run.call_count == len(_PLAYER_CLIENTS)
+
+    @patch("src.downloader.subprocess.run")
+    def test_retries_on_http_400(self, mock_run):
+        """Should retry when YouTube returns HTTP 400 (often bot detection)."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stderr="WARNING: [youtube] HTTP Error 400: Bad Request. Retrying..."
+        )
+        with pytest.raises(RuntimeError, match="YouTube is blocking"):
+            download_audio("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
         assert mock_run.call_count == len(_PLAYER_CLIENTS)
 
     @patch("src.downloader.subprocess.run")

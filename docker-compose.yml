@@ -9,6 +9,9 @@ services:
       - MEM0_QDRANT_PORT=6333
       - MEM0_NEO4J_URL=bolt://neo4j:7687
       - WEBAPP_URL=https://neurotwin.me
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       qdrant:
         condition: service_healthy
@@ -25,6 +28,9 @@ services:
       - MEM0_QDRANT_HOST=qdrant
       - MEM0_QDRANT_PORT=6333
       - MEM0_NEO4J_URL=bolt://neo4j:7687
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     ports:
       - "8100:8000"
     depends_on:

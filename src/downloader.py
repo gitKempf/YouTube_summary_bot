@@ -98,6 +98,7 @@ def download_audio(url: str, output_dir: str = "/tmp") -> Path:
     cookies = cookies_file if Path(cookies_file).exists() else None
 
     last_error = ""
+    is_bot_error = False
     for client in _PLAYER_CLIENTS:
         # Clean up any partial downloads from previous attempts
         for ext in [".m4a", ".webm", ".opus", ".mp3", ".part"]:
@@ -115,12 +116,18 @@ def download_audio(url: str, output_dir: str = "/tmp") -> Path:
                 if alt.exists():
                     return alt
 
-        last_error = result.stderr[:300]
-        # Only retry with different clients for bot detection errors
-        if "Sign in to confirm" not in last_error and "bot" not in last_error.lower():
+        full_stderr = result.stderr
+        last_error = full_stderr[:500]
+        # Retry with different clients for bot detection or YouTube API errors
+        is_youtube_block = (
+            "Sign in to confirm" in full_stderr
+            or "LOGIN_REQUIRED" in full_stderr
+            or "HTTP Error 400" in full_stderr
+        )
+        if not is_youtube_block:
             break
 
-    if "Sign in to confirm" in last_error or "bot" in last_error.lower():
+    if is_youtube_block:
         raise RuntimeError(
             f"YouTube is blocking audio download for this video from this server. "
             f"The video may not have captions and cannot be processed. "
