@@ -2,6 +2,8 @@ services:
   bot:
     build: .
     env_file: .env
+    volumes:
+      - ./cookies.txt:/app/cookies.txt:ro
     environment:
       - MEM0_QDRANT_HOST=qdrant
       - MEM0_QDRANT_PORT=6333

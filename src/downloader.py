@@ -54,10 +54,10 @@ def fetch_video_title(video_id: str) -> str:
 
 def download_audio(url: str, output_dir: str = "/tmp") -> Path:
     """Download audio from YouTube using yt-dlp (handles bot detection)."""
+    import os
     video_id = extract_video_id(url)
-    output_path = Path(output_dir) / f"audio_{video_id}.mp4"
+    output_path = Path(output_dir) / f"audio_{video_id}.m4a"
 
-    output_path = output_path.with_suffix(".m4a")
     cmd = [
         "yt-dlp",
         "--extract-audio",
@@ -65,9 +65,14 @@ def download_audio(url: str, output_dir: str = "/tmp") -> Path:
         "--output", str(output_path),
         "--no-playlist",
         "--quiet",
-        "--extractor-args", "youtube:player_client=ios,web",
         url,
     ]
+
+    # Use cookies file if available (required for bot-blocked videos)
+    cookies_file = os.environ.get("YOUTUBE_COOKIES_FILE", "/app/cookies.txt")
+    if Path(cookies_file).exists():
+        cmd.insert(1, "--cookies")
+        cmd.insert(2, cookies_file)
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if result.returncode != 0:
         raise RuntimeError(f"yt-dlp failed: {result.stderr[:300]}")
