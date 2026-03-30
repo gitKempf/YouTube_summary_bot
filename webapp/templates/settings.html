@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>YouTube Summary Bot</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
@@ -24,7 +24,7 @@
                background: var(--secondary); color: var(--text); padding: 0; min-height: 100vh;
                -webkit-font-smoothing: antialiased; }
 
-        .tabs { display: flex; gap: 0; padding: 8px 20px 0; background: var(--bg);
+        .tabs { display: flex; gap: 0; padding: calc(8px + env(safe-area-inset-top, 0px)) 20px 0; background: var(--bg);
                 position: sticky; top: 0; z-index: 10; }
         .tab { flex: 1; text-align: center; padding: 10px 0 14px; font-size: 13px; font-weight: 600;
                color: var(--hint); cursor: pointer; border-bottom: 2px solid transparent;
