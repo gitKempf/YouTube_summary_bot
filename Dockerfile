@@ -2,9 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps: ffmpeg + deno (required by yt-dlp for YouTube extraction)
+# System deps: ffmpeg + deno + git (required by yt-dlp for YouTube extraction)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg curl unzip \
+    ffmpeg curl unzip git \
     && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
     && rm -rf /var/lib/apt/lists/*
 
@@ -12,6 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir sentence-transformers langchain-neo4j rank-bm25
+
+# Set up bgutil PO token provider for yt-dlp (bypasses YouTube bot detection)
+RUN pip install --no-cache-dir bgutil-ytdlp-pot-provider \
+    && git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /root/bgutil-ytdlp-pot-provider \
+    && cd /root/bgutil-ytdlp-pot-provider/server && deno install \
+    && rm -rf /root/bgutil-ytdlp-pot-provider/.git
 
 # Copy app code
 COPY src/ src/

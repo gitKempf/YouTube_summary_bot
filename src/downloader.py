@@ -52,12 +52,9 @@ def fetch_video_title(video_id: str) -> str:
         return ""
 
 
-def download_audio(url: str, output_dir: str = "/tmp") -> Path:
-    """Download audio from YouTube using yt-dlp (handles bot detection)."""
-    import os
-    video_id = extract_video_id(url)
-    output_path = Path(output_dir) / f"audio_{video_id}.m4a"
-
+def _build_ytdlp_cmd(url: str, output_path: Path, cookies_file: Optional[str] = None,
+                      player_client: Optional[str] = None) -> list[str]:
+    """Build yt-dlp command with appropriate flags."""
     cmd = [
         "yt-dlp",
         "--extract-audio",
@@ -65,24 +62,68 @@ def download_audio(url: str, output_dir: str = "/tmp") -> Path:
         "--output", str(output_path),
         "--no-playlist",
         "--quiet",
-        url,
+        "--force-ipv4",
     ]
 
-    # Use cookies file if available (required for bot-blocked videos)
+    # Build extractor args
+    extractor_parts = ["fetch_pot=always"]
+    if player_client:
+        extractor_parts.append(f"player_client={player_client}")
+    cmd.extend(["--extractor-args", f"youtube:{';'.join(extractor_parts)}"])
+
+    # Use cookies file if available
+    if cookies_file and Path(cookies_file).exists():
+        cmd.extend(["--cookies", cookies_file])
+
+    cmd.append(url)
+    return cmd
+
+
+# Player client combinations to try, in order of likelihood to work
+_PLAYER_CLIENTS = [
+    None,                    # default (android_vr + web_embedded)
+    "web",                   # standard web client
+    "tv,mweb",               # TV + mobile web
+    "ios,android",           # mobile clients
+]
+
+
+def download_audio(url: str, output_dir: str = "/tmp") -> Path:
+    """Download audio from YouTube using yt-dlp with PO token support and client fallback."""
+    import os
+    video_id = extract_video_id(url)
+    output_path = Path(output_dir) / f"audio_{video_id}.m4a"
+
     cookies_file = os.environ.get("YOUTUBE_COOKIES_FILE", "/app/cookies.txt")
-    if Path(cookies_file).exists():
-        cmd.insert(1, "--cookies")
-        cmd.insert(2, cookies_file)
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-        raise RuntimeError(f"yt-dlp failed: {result.stderr[:300]}")
+    cookies = cookies_file if Path(cookies_file).exists() else None
 
-    # yt-dlp may save with different extension, find the actual file
-    if not output_path.exists():
-        for ext in [".m4a", ".webm", ".opus", ".mp3"]:
-            alt = output_path.with_suffix(ext)
-            if alt.exists():
-                return alt
-        raise RuntimeError(f"Downloaded file not found at {output_path}")
+    last_error = ""
+    for client in _PLAYER_CLIENTS:
+        # Clean up any partial downloads from previous attempts
+        for ext in [".m4a", ".webm", ".opus", ".mp3", ".part"]:
+            output_path.with_suffix(ext).unlink(missing_ok=True)
 
-    return output_path
+        cmd = _build_ytdlp_cmd(url, output_path, cookies, client)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+
+        if result.returncode == 0:
+            # Find the output file
+            if output_path.exists():
+                return output_path
+            for ext in [".m4a", ".webm", ".opus", ".mp3"]:
+                alt = output_path.with_suffix(ext)
+                if alt.exists():
+                    return alt
+
+        last_error = result.stderr[:300]
+        # Only retry with different clients for bot detection errors
+        if "Sign in to confirm" not in last_error and "bot" not in last_error.lower():
+            break
+
+    if "Sign in to confirm" in last_error or "bot" in last_error.lower():
+        raise RuntimeError(
+            f"YouTube is blocking audio download for this video from this server. "
+            f"The video may not have captions and cannot be processed. "
+            f"Try a video with subtitles/captions enabled."
+        )
+    raise RuntimeError(f"yt-dlp failed: {last_error}")
