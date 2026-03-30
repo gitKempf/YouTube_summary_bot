@@ -87,6 +87,16 @@ class TestDownloadAudio:
         assert "dQw4w9WgXcQ" in str(result)
 
     @patch("src.downloader.subprocess.run")
+    @patch("src.downloader.Path.exists", return_value=True)
+    def test_uses_valid_audio_format(self, mock_exists, mock_run):
+        """yt-dlp requires m4a not mp4 as audio format."""
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+        download_audio("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        cmd = mock_run.call_args[0][0]
+        fmt_idx = cmd.index("--audio-format") + 1
+        assert cmd[fmt_idx] == "m4a", f"Expected m4a but got {cmd[fmt_idx]}"
+
+    @patch("src.downloader.subprocess.run")
     def test_raises_on_ytdlp_failure(self, mock_run):
         mock_run.return_value = MagicMock(returncode=1, stderr="ERROR: video unavailable")
 

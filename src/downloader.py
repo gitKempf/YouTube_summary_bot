@@ -57,10 +57,11 @@ def download_audio(url: str, output_dir: str = "/tmp") -> Path:
     video_id = extract_video_id(url)
     output_path = Path(output_dir) / f"audio_{video_id}.mp4"
 
+    output_path = output_path.with_suffix(".m4a")
     cmd = [
         "yt-dlp",
         "--extract-audio",
-        "--audio-format", "mp4",
+        "--audio-format", "m4a",
         "--output", str(output_path),
         "--no-playlist",
         "--quiet",
