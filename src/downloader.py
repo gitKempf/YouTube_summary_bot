@@ -1,12 +1,17 @@
 import json
+import logging
 import re
 import subprocess
+import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisabled
+
+logger = logging.getLogger(__name__)
 
 YOUTUBE_REGEX = re.compile(
     r"(?:youtube\.com/watch\?v=|youtu\.be/)([\w-]{11})"
@@ -26,18 +31,36 @@ def extract_video_id(url: str) -> str:
     return match.group(1)
 
 
+_TRANSCRIPT_RETRIES = 3
+_TRANSCRIPT_RETRY_DELAY = 2
+
+
 def fetch_transcript(video_id: str) -> Optional[TranscriptFetchResult]:
-    """Try to fetch YouTube's built-in captions. Returns None if unavailable."""
-    try:
-        ytt_api = YouTubeTranscriptApi()
-        transcript = ytt_api.fetch(video_id)
-        text = " ".join(entry.text for entry in transcript.snippets)
-        if text.strip():
-            return TranscriptFetchResult(
-                text=text, language_code=transcript.language_code
+    """Try to fetch YouTube's built-in captions with retries.
+
+    Returns None only if the video genuinely has no captions.
+    Retries on network/API errors to handle intermittent failures.
+    """
+    for attempt in range(_TRANSCRIPT_RETRIES):
+        try:
+            ytt_api = YouTubeTranscriptApi()
+            transcript = ytt_api.fetch(video_id)
+            text = " ".join(entry.text for entry in transcript.snippets)
+            if text.strip():
+                return TranscriptFetchResult(
+                    text=text, language_code=transcript.language_code
+                )
+            return None  # Empty transcript text
+        except (TranscriptsDisabled, NoTranscriptFound):
+            # Video genuinely has no captions — don't retry
+            return None
+        except Exception as e:
+            logger.warning(
+                "Transcript fetch attempt %d/%d for %s failed: %s",
+                attempt + 1, _TRANSCRIPT_RETRIES, video_id, e,
             )
-    except Exception:
-        pass
+            if attempt < _TRANSCRIPT_RETRIES - 1:
+                time.sleep(_TRANSCRIPT_RETRY_DELAY)
     return None
 
 

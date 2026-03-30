@@ -2,9 +2,12 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
+from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisabled
+
 from src.downloader import (
     extract_video_id, download_audio, fetch_transcript,
     TranscriptFetchResult, _build_ytdlp_cmd, _PLAYER_CLIENTS,
+    _TRANSCRIPT_RETRIES,
 )
 
 
@@ -48,15 +51,66 @@ class TestFetchTranscript:
         assert result.text == "Hello world"
         assert result.language_code == "en"
 
+    @patch("src.downloader.time.sleep")
     @patch("src.downloader.YouTubeTranscriptApi")
-    def test_returns_none_on_error(self, mock_api_class):
+    def test_retries_on_network_error(self, mock_api_class, mock_sleep):
+        """Network errors should trigger retries."""
         mock_api = MagicMock()
         mock_api_class.return_value = mock_api
-        mock_api.fetch.side_effect = Exception("No captions")
+        mock_api.fetch.side_effect = ConnectionError("Network unreachable")
 
         result = fetch_transcript("dQw4w9WgXcQ")
 
         assert result is None
+        assert mock_api.fetch.call_count == _TRANSCRIPT_RETRIES
+
+    @patch("src.downloader.time.sleep")
+    @patch("src.downloader.YouTubeTranscriptApi")
+    def test_no_retry_on_transcripts_disabled(self, mock_api_class, mock_sleep):
+        """TranscriptsDisabled means no captions — don't retry."""
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.fetch.side_effect = TranscriptsDisabled("test123")
+
+        result = fetch_transcript("test123")
+
+        assert result is None
+        assert mock_api.fetch.call_count == 1
+
+    @patch("src.downloader.time.sleep")
+    @patch("src.downloader.YouTubeTranscriptApi")
+    def test_no_retry_on_no_transcript_found(self, mock_api_class, mock_sleep):
+        """NoTranscriptFound means no matching captions — don't retry."""
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.fetch.side_effect = NoTranscriptFound("test123", ["en"], [])
+
+        result = fetch_transcript("test123")
+
+        assert result is None
+        assert mock_api.fetch.call_count == 1
+
+    @patch("src.downloader.time.sleep")
+    @patch("src.downloader.YouTubeTranscriptApi")
+    def test_succeeds_after_retry(self, mock_api_class, mock_sleep):
+        """Should return transcript if retry succeeds."""
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_transcript = MagicMock()
+        mock_snippet = MagicMock()
+        mock_snippet.text = "Hello"
+        mock_transcript.snippets = [mock_snippet]
+        mock_transcript.language_code = "en"
+        mock_api.fetch.side_effect = [
+            ConnectionError("fail"),
+            mock_transcript,
+        ]
+
+        result = fetch_transcript("dQw4w9WgXcQ")
+
+        assert result is not None
+        assert result.text == "Hello"
+        assert mock_api.fetch.call_count == 2
 
     @patch("src.downloader.YouTubeTranscriptApi")
     def test_returns_none_on_empty_text(self, mock_api_class):
