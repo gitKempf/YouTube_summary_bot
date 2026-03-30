@@ -65,6 +65,7 @@ def download_audio(url: str, output_dir: str = "/tmp") -> Path:
         "--output", str(output_path),
         "--no-playlist",
         "--quiet",
+        "--extractor-args", "youtube:player_client=ios,web",
         url,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
