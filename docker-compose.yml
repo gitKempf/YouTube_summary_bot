@@ -50,7 +50,7 @@ services:
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${MEM0_NEO4J_PASSWORD:-neo4jpassword}", "RETURN 1"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/7687'"]
       interval: 10s
       timeout: 5s
       retries: 10
