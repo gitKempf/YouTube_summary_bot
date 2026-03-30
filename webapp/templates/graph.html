@@ -224,10 +224,10 @@
                 .text(d => d.type==='claim' ? (d.text||'').substring(0,28)+((d.text||'').length>28?'...':'') : d.label)
                 .attr('font-size', d => d.type==='claim'?'6px':d.type==='video'?'9px':nr(d)>14?'10px':'8px')
                 .attr('font-weight', d => d.type!=='claim'&&nr(d)>14?'600':'400')
-                .attr('fill', d => d.type==='claim'?'#aaa':'#333')
+                .attr('fill', d => d.type==='claim'?'#666':'#333')
                 .attr('text-anchor', 'middle')
                 .attr('dy', d => nr(d)+(d.type==='claim'?7:13))
-                .attr('opacity', d => d.type==='claim'?0.45:0.85)
+                .attr('opacity', d => d.type==='claim'?0.7:0.85)
                 .attr('pointer-events', 'none');
 
             // Hover
@@ -242,7 +242,7 @@
                 labelEls.attr('opacity', n => conn.has(n.id)?1:0.06);
             }).on('mouseout', () => {
                 nodeEls.attr('opacity', 1); linkEls.attr('opacity', 1);
-                labelEls.attr('opacity', d => d.type==='claim'?0.45:0.85);
+                labelEls.attr('opacity', d => d.type==='claim'?0.7:0.85);
             });
 
             // Click → detail panel
@@ -272,16 +272,20 @@
                 const vClaims = (window._claims||[]).filter(c => c.video_id === d.id.replace('v:',''));
                 if (vClaims.length) {
                     body += `<div style="margin-top:12px;font-size:13px;color:var(--hint);font-weight:600">${vClaims.length} Claims</div>`;
-                    vClaims.slice(0,10).forEach(c => { body += `<div class="claim-item">${c.text}</div>`; });
-                    if (vClaims.length > 10) body += `<div style="padding:8px 0;color:var(--hint);font-size:12px">+ ${vClaims.length-10} more</div>`;
+                    body += `<div id="detail-claims-list">`;
+                    vClaims.slice(0,6).forEach(c => { body += `<div class="claim-item">${c.text}</div>`; });
+                    body += `</div>`;
+                    if (vClaims.length > 6) body += `<div id="detail-load-more" style="padding:10px 0;cursor:pointer;color:var(--link);font-size:13px;font-weight:600" onclick="loadMoreClaims('video','${d.id.replace('v:','')}')">Show ${vClaims.length-6} more</div>`;
                 }
             } else {
                 title = d.label;
                 body = `<div class="row"><span class="lbl">Claims</span><span class="val">${d.size}</span></div>`;
                 const eClaims = (window._claims||[]).filter(c => c.entity === d.label);
                 if (eClaims.length) {
-                    eClaims.slice(0,10).forEach(c => { body += `<div class="claim-item">${c.text}</div>`; });
-                    if (eClaims.length > 10) body += `<div style="padding:8px 0;color:var(--hint);font-size:12px">+ ${eClaims.length-10} more</div>`;
+                    body += `<div id="detail-claims-list">`;
+                    eClaims.slice(0,6).forEach(c => { body += `<div class="claim-item">${c.text}</div>`; });
+                    body += `</div>`;
+                    if (eClaims.length > 6) body += `<div id="detail-load-more" style="padding:10px 0;cursor:pointer;color:var(--link);font-size:13px;font-weight:600" onclick="loadMoreClaims('entity','${d.label.replace(/'/g,"\\'")}')">Show ${eClaims.length-6} more</div>`;
                 }
             }
             document.getElementById('detail-title').textContent = title;
@@ -290,6 +294,18 @@
         }
 
         function closeDetail() { document.getElementById('detail').classList.remove('open'); }
+
+        function loadMoreClaims(type, key) {
+            const claims = (window._claims||[]).filter(c =>
+                type === 'video' ? c.video_id === key : c.entity === key
+            );
+            const list = document.getElementById('detail-claims-list');
+            if (list) {
+                list.innerHTML = claims.map(c => `<div class="claim-item">${c.text}</div>`).join('');
+            }
+            const btn = document.getElementById('detail-load-more');
+            if (btn) btn.remove();
+        }
 
         // Zoom controls
         function zoomIn() { d3.select('#graph svg').transition().call(svgZoom.scaleBy, 1.5); }
