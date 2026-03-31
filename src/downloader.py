@@ -31,6 +31,11 @@ def extract_video_id(url: str) -> str:
     return match.group(1)
 
 
+class TranscriptRateLimited(Exception):
+    """Raised when YouTube rate-limits transcript requests from this IP."""
+    pass
+
+
 _TRANSCRIPT_RETRIES = 5
 _TRANSCRIPT_BACKOFF = [3, 6, 12, 20]  # seconds between retries (exponential-ish)
 
@@ -39,8 +44,10 @@ def fetch_transcript(video_id: str) -> Optional[TranscriptFetchResult]:
     """Try to fetch YouTube's built-in captions with retries.
 
     Returns None only if the video genuinely has no captions.
+    Raises TranscriptRateLimited if YouTube is blocking this IP.
     Retries with exponential backoff on network/API errors and rate limiting.
     """
+    last_error = None
     for attempt in range(_TRANSCRIPT_RETRIES):
         try:
             ytt_api = YouTubeTranscriptApi()
@@ -55,6 +62,7 @@ def fetch_transcript(video_id: str) -> Optional[TranscriptFetchResult]:
             # Video genuinely has no captions — don't retry
             return None
         except Exception as e:
+            last_error = e
             logger.warning(
                 "Transcript fetch attempt %d/%d for %s failed: %s",
                 attempt + 1, _TRANSCRIPT_RETRIES, video_id, e,
@@ -62,6 +70,14 @@ def fetch_transcript(video_id: str) -> Optional[TranscriptFetchResult]:
             if attempt < _TRANSCRIPT_RETRIES - 1:
                 delay = _TRANSCRIPT_BACKOFF[min(attempt, len(_TRANSCRIPT_BACKOFF) - 1)]
                 time.sleep(delay)
+
+    # All retries exhausted — check if it was rate limiting
+    error_str = str(last_error) if last_error else ""
+    if "blocking" in error_str.lower() or "RequestBlocked" in type(last_error).__name__:
+        raise TranscriptRateLimited(
+            "YouTube is temporarily rate-limiting requests from this server. "
+            "The video likely has captions. Please try again in 2-3 minutes."
+        )
     return None
 
 

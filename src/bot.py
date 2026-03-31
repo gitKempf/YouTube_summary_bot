@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 from src.config import get_config
-from src.downloader import download_audio, extract_video_id, fetch_transcript, fetch_video_title
+from src.downloader import download_audio, extract_video_id, fetch_transcript, fetch_video_title, TranscriptRateLimited
 from src.fact_checker import extract_claims, classify_claims, build_context_prompt
 from src.memory import MemoryManager
 from src.transcriber import transcribe_audio, TranscriptionError
@@ -293,6 +293,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         video_id = extract_video_id(url)
 
+        # Check if this video was already processed for this user
+        if memory_mgr:
+            existing = await memory_mgr.get_transcript(video_id=video_id, user_id=user_mem_id)
+            if existing:
+                title = existing.get("title") or video_id
+                await update.message.reply_text(
+                    f"This video was already processed:\n\n"
+                    f"<b>{_escape_html(title)}</b>\n\n"
+                    f"Check your knowledge in the dashboard.",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("Open Dashboard", web_app=WebAppInfo(url=f"{WEBAPP_URL}/app")),
+                    ]]),
+                )
+                return
+
         status_msg = await update.message.reply_text(
             _progress_bar(0, "Starting...")
         )
@@ -300,7 +316,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Step 1: Transcript (0% -> 10%)
         await progress.update(2, "Fetching transcript...")
-        transcript_result = await asyncio.to_thread(fetch_transcript, video_id)
+        try:
+            transcript_result = await asyncio.to_thread(fetch_transcript, video_id)
+        except TranscriptRateLimited:
+            await status_msg.edit_text(
+                "YouTube is temporarily rate-limiting this server.\n"
+                "The video likely has captions — please try again in 2-3 minutes."
+            )
+            return
 
         has_captions = False
         if transcript_result:

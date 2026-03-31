@@ -6,7 +6,8 @@ from youtube_transcript_api._errors import NoTranscriptFound, TranscriptsDisable
 
 from src.downloader import (
     extract_video_id, download_audio, fetch_transcript,
-    TranscriptFetchResult, _build_ytdlp_cmd, _PLAYER_CLIENTS,
+    TranscriptFetchResult, TranscriptRateLimited,
+    _build_ytdlp_cmd, _PLAYER_CLIENTS,
     _TRANSCRIPT_RETRIES, _TRANSCRIPT_BACKOFF,
 )
 
@@ -111,6 +112,21 @@ class TestFetchTranscript:
         assert result is not None
         assert result.text == "Hello"
         assert mock_api.fetch.call_count == 2
+
+    @patch("src.downloader.time.sleep")
+    @patch("src.downloader.YouTubeTranscriptApi")
+    def test_raises_rate_limited_on_persistent_block(self, mock_api_class, mock_sleep):
+        """Should raise TranscriptRateLimited when all retries fail with blocking error."""
+        mock_api = MagicMock()
+        mock_api_class.return_value = mock_api
+        mock_api.fetch.side_effect = Exception(
+            "YouTube is blocking requests from your IP"
+        )
+
+        with pytest.raises(TranscriptRateLimited, match="rate-limiting"):
+            fetch_transcript("blocked_video")
+
+        assert mock_api.fetch.call_count == _TRANSCRIPT_RETRIES
 
     @patch("src.downloader.YouTubeTranscriptApi")
     def test_returns_none_on_empty_text(self, mock_api_class):
